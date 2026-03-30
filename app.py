@@ -273,7 +273,7 @@ if room and username:
     if st.session_state.get('form_submitted', False):
         st.session_state['form_submitted'] = False
 else:
-    st.info("Masukkan nama room dan username untuk mulai chat.")
+    st.info("Masukkan nama room (unik) dan username untuk mulai chat.")
 
 
 st.caption("Software ini dibuat dengan 100% python, dan memanfaatkan teknologi Streamlit. 🔒 Pesan dienkripsi dan bersifat temporary, dan akan hilang dengan cara destroy atau saat server reboot. Jangan lupa hapus session dan chat room setelah selesai dengan fitur Destroy Chat Room.")
