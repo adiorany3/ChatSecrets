@@ -147,7 +147,7 @@ if room and username:
             st.toast(f"Pesan baru dari {last_msg['username']}: {last_msg['text']}")
             # Play sound notification using HTML5 Audio
             st.markdown('''
-                <audio id="notif-audio" src="https://cdn.pixabay.com/audio/2022/07/26/audio_124bfae7b6.mp3" autoplay></audio>
+                <audio id="notif-audio" src="https://cdn.pixabay.com/download/audio/2026/01/24/audio_f7ed9fb119.mp3" autoplay></audio>
                 <script>
                 var audio = document.getElementById('notif-audio');
                 if(audio){ audio.play(); }
