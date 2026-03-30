@@ -10,6 +10,12 @@ Aplikasi chat multi-room rahasia berbasis Streamlit. Setiap user dapat membuat r
 - Destroy chat room dengan kode kunci rahasia
 - UI dengan emoji/icon modern
 
+## Keamanan & Fitur Tambahan
+- **Enkripsi Pesan:** Semua pesan dienkripsi otomatis menggunakan Fernet (cryptography) sebelum disimpan ke file. Hanya aplikasi ini yang dapat membaca pesan.
+- **Zona Waktu:** Waktu pengiriman pesan otomatis disesuaikan ke UTC+7 (WIB).
+- **Favicon:** Favicon custom dapat diubah di folder `static/`.
+- **Tampilan Hacker Style:** UI gelap, aksen hijau neon, dan font monospace ala terminal hacker.
+
 ## Cara Menjalankan
 1. **Install dependencies**
    ```bash
@@ -31,6 +37,10 @@ Aplikasi chat multi-room rahasia berbasis Streamlit. Setiap user dapat membuat r
 ## Catatan
 - Pesan dan status online hanya tersimpan selama server berjalan.
 - Untuk privasi lebih, jalankan di server sendiri.
+
+## Troubleshooting
+- Jika terjadi error JSONDecodeError, pastikan file `chat_rooms.json` dan `online_status.json` berisi `{}` (objek kosong).
+- Jika pesan tidak dapat didekripsi, pastikan file `fernet.key` tidak hilang/berubah setelah pesan dibuat.
 
 ---
 
