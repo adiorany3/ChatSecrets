@@ -51,7 +51,7 @@ if 'usernames' not in st.session_state:
     st.session_state['usernames'] = {}
 
 # Streamlit's st.title does not support HTML, so use st.markdown for styled title
-st.markdown("<h1 style='color:#00ff00;text-shadow:0 0 10px #00ff00;'>💬🔒 Secret Multi-Room Chat</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='color:#00ff00;text-shadow:0 0 10px #00ff00;'>🔒 Secret Multi-Room Chat 🔒</h1>", unsafe_allow_html=True)
 
 # Pilih atau buat room
 st.markdown("""
