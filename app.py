@@ -6,6 +6,13 @@ import json
 import os
 import time
 
+# Force Streamlit to use dark theme if user's OS is in dark mode
+st.markdown("""
+<style>
+body, .stApp { color-scheme: dark; }
+</style>
+""", unsafe_allow_html=True)
+
 # Fernet encryption
 from cryptography.fernet import Fernet
 
