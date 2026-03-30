@@ -6,7 +6,11 @@ import json
 import os
 import time
 
-st.set_page_config(page_title="Secret Multi-Room Chat", page_icon="static/favicon.ico", layout="centered")
+st.set_page_config(
+    page_title="Secret Multi-Room Chat",
+    page_icon="static/favicon.ico",  # use relative path for Streamlit local static asset
+    layout="centered"
+)
 
 # Path file untuk penyimpanan pesan bersama
 CHAT_FILE = "chat_rooms.json"
@@ -41,15 +45,27 @@ def save_online(online):
 # Simpan pesan di session_state (hanya bertahan selama server berjalan)
 if 'rooms' not in st.session_state:
     st.session_state['rooms'] = load_rooms()
+
+
 if 'usernames' not in st.session_state:
     st.session_state['usernames'] = {}
 
-st.title("💬🔒 Secret Multi-Room Chat")
+# Streamlit's st.title does not support HTML, so use st.markdown for styled title
+st.markdown("<h1 style='color:#00ff00;text-shadow:0 0 10px #00ff00;'>💬🔒 Secret Multi-Room Chat</h1>", unsafe_allow_html=True)
 
 # Pilih atau buat room
-
-room = st.text_input("Masukkan nama room (atau buat baru):", key="room_input")
-username = st.text_input("Masukkan username Anda:", key="username_input")
+st.markdown("""
+<div style='background:#111;padding:16px;border-radius:8px;border:1px solid #00ff00;box-shadow:0 0 10px #00ff00;'>
+<b>Masukkan nama room dibawah ini (atau buat baru):</b>
+</div>
+""", unsafe_allow_html=True)
+room = st.text_input("", key="room_input")
+st.markdown("""
+<div style='background:#111;padding:16px;border-radius:8px;border:1px solid #00ff00;box-shadow:0 0 10px #00ff00;margin-top:8px;'>
+<b>Masukkan username Anda dibawah ini:</b>
+</div>
+""", unsafe_allow_html=True)
+username = st.text_input("", key="username_input")
 
 # Reset flag form_submitted di awal setiap render agar auto-refresh bisa aktif lagi setelah submit selesai
 if st.session_state.get('form_submitted', False):
