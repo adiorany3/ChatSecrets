@@ -252,7 +252,7 @@ else:
     st.info("Masukkan nama room dan username untuk mulai chat.")
 
 
-st.caption("💡 Pesan hanya tersimpan selama server berjalan. Untuk privasi lebih, gunakan server sendiri. Jangan lupa hapus session dan chat room setelah selesai dengan fitur Destroy Chat Room.")
+st.caption("💡 Pesan hanya tersimpan selama server berjalan, dan bersifat sementara. Jangan lupa hapus session dan chat room setelah selesai dengan fitur Destroy Chat Room.")
 
 # Tombol manual refresh chat
 if room and username:
