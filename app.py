@@ -6,7 +6,7 @@ import json
 import os
 import time
 
-st.set_page_config(page_title="Secret Multi-Room Chat", layout="centered")
+st.set_page_config(page_title="Secret Multi-Room Chat", page_icon="static/favicon.ico", layout="centered")
 
 # Path file untuk penyimpanan pesan bersama
 CHAT_FILE = "chat_rooms.json"
