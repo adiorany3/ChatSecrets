@@ -250,7 +250,10 @@ if room and username:
         if send and message:
             # Set flag agar auto-refresh tidak aktif saat submit
             st.session_state['form_submitted'] = True
-            now = datetime.now().strftime('%H:%M')
+            # Set waktu ke UTC+7 (WIB)
+            from datetime import timezone, timedelta
+            wib = timezone(timedelta(hours=7))
+            now = datetime.now(wib).strftime('%H:%M')
             # Tambahkan pesan baru dan simpan (dengan enkripsi)
             rooms = load_rooms()
             if room not in rooms:
