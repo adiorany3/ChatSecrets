@@ -140,6 +140,7 @@ if room and username:
     st.session_state['usernames'][st.session_state['user_id']] = username
     st.subheader(f"Room: {room}")
     st.write(f"Anda masuk sebagai: {username}")
+    st.info("Waktu Anda adalah 30 menit sejak masuk, klik Refresh Chat di bawah, jika membutuhkan tambahan waktu")
 
     # Tampilkan status online lawan bicara di room
     online = load_online()
