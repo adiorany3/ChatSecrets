@@ -71,7 +71,7 @@ st.markdown("<h1 style='color:#00ff00;text-shadow:0 0 10px #00ff00;'>🔒 Secret
 # Pilih atau buat room
 st.markdown("""
 <div style='background:#111;padding:16px;border-radius:8px;border:1px solid #00ff00;box-shadow:0 0 10px #00ff00;'>
-<b>Masukkan nama room dibawah ini (atau buat baru):</b>
+<b>Masukkan nama room dibawah ini (buatlah nama unik, dan share ke lawan bicara):</b>
 </div>
 """, unsafe_allow_html=True)
 room = st.text_input("", key="room_input")
