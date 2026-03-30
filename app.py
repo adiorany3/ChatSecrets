@@ -145,6 +145,14 @@ if room and username:
         last_msg = messages[-1]
         if last_msg['username'] != username:
             st.toast(f"Pesan baru dari {last_msg['username']}: {last_msg['text']}")
+            # Play sound notification using HTML5 Audio
+            st.markdown('''
+                <audio id="notif-audio" src="https://cdn.pixabay.com/audio/2022/07/26/audio_124bfae7b6.mp3" autoplay></audio>
+                <script>
+                var audio = document.getElementById('notif-audio');
+                if(audio){ audio.play(); }
+                </script>
+            ''', unsafe_allow_html=True)
     st.session_state['last_message_count'] = len(messages)
     # Counter untuk reset input box
     if 'input_counter' not in st.session_state:
