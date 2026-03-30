@@ -6,6 +6,21 @@ import json
 import os
 import time
 
+# Fernet encryption
+from cryptography.fernet import Fernet
+
+# Path for encryption key
+FERNET_KEY_FILE = "fernet.key"
+def get_fernet():
+    if not os.path.exists(FERNET_KEY_FILE):
+        key = Fernet.generate_key()
+        with open(FERNET_KEY_FILE, "wb") as f:
+            f.write(key)
+    else:
+        with open(FERNET_KEY_FILE, "rb") as f:
+            key = f.read()
+    return Fernet(key)
+
 st.set_page_config(
     page_title="Secret Multi-Room Chat",
     page_icon="static/favicon.ico",  # use relative path for Streamlit local static asset
@@ -214,8 +229,14 @@ if room and username:
         bubble_class = "chat-bubble me" if is_me else "chat-bubble"
         time_str = msg.get("time", "")
         user_icon = "🧑‍💻" if is_me else "👤"
+        # Dekripsi pesan
+        try:
+            fernet = get_fernet()
+            decrypted_text = fernet.decrypt(msg["text"].encode()).decode()
+        except Exception:
+            decrypted_text = "[Pesan tidak dapat didekripsi]"
         chat_html += f'<div class="chat-message" style="align-items: {"flex-end" if is_me else "flex-start"};">'
-        chat_html += f'<div class="{bubble_class}">{user_icon} {msg["text"]}</div>'
+        chat_html += f'<div class="{bubble_class}">{user_icon} {decrypted_text}</div>'
         chat_html += f'<div class="chat-meta">{msg["username"]} {"(Anda)" if is_me else ""} {time_str}</div>'
         chat_html += '</div>'
     chat_html += '</div>'
@@ -230,13 +251,15 @@ if room and username:
             # Set flag agar auto-refresh tidak aktif saat submit
             st.session_state['form_submitted'] = True
             now = datetime.now().strftime('%H:%M')
-            # Tambahkan pesan baru dan simpan
+            # Tambahkan pesan baru dan simpan (dengan enkripsi)
             rooms = load_rooms()
             if room not in rooms:
                 rooms[room] = []
+            fernet = get_fernet()
+            encrypted_text = fernet.encrypt(message.encode()).decode()
             rooms[room].append({
                 'username': username,
-                'text': message,
+                'text': encrypted_text,
                 'time': now
             })
             save_rooms(rooms)
