@@ -26,7 +26,7 @@ Aplikasi chat multi-room rahasia berbasis Streamlit. Setiap user dapat membuat r
    streamlit run app.py
    ```
 3. **Akses di browser**
-   - Buka [https://ngobrol.streamlit.app](https://ngobrol.streamlit.app/)
+   - Akses web online : [https://ngobrol.streamlit.app](https://ngobrol.streamlit.app/)
 
 ## Penggunaan
 - Masukkan nama room dan username untuk masuk.
