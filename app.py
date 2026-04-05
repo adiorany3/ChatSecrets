@@ -261,7 +261,11 @@ if room and username:
     with st.form(key="send_message_form"):
         input_key = f"message_input_box_{room}_{username}_{st.session_state['input_counter']}"
         message = st.text_input("Ketik pesan...", key=input_key)
-        send = st.form_submit_button("Kirim")
+        col1, col2 = st.columns([3,1])
+        with col1:
+            send = st.form_submit_button("Kirim")
+        with col2:
+            ping = st.form_submit_button("Ping 🏓")
         if send and message:
             # Set flag agar auto-refresh tidak aktif saat submit
             st.session_state['form_submitted'] = True
@@ -283,6 +287,29 @@ if room and username:
             save_rooms(rooms)
             st.session_state['input_counter'] += 1  # Ganti key input agar box kosong
             # Setelah submit, rerun dan flag akan direset di awal render
+            try:
+                st.rerun()
+            except AttributeError:
+                st.experimental_rerun()
+        # Tombol Ping
+        if ping:
+            st.session_state['form_submitted'] = True
+            from datetime import timezone, timedelta
+            wib = timezone(timedelta(hours=7))
+            now = datetime.now(wib).strftime('%H:%M')
+            rooms = load_rooms()
+            if room not in rooms:
+                rooms[room] = []
+            fernet = get_fernet()
+            ping_text = f"PING! 🏓"
+            encrypted_text = fernet.encrypt(ping_text.encode()).decode()
+            rooms[room].append({
+                'username': username,
+                'text': encrypted_text,
+                'time': now
+            })
+            save_rooms(rooms)
+            st.session_state['input_counter'] += 1
             try:
                 st.rerun()
             except AttributeError:
