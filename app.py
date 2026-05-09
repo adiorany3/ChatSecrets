@@ -662,7 +662,7 @@ def render_page_sound_trigger(sound_data_uri: str) -> str:
 def render_header() -> None:
     st.markdown(
         """
-        <h1>CHATSECRETS <span class="cursor-blink"></span></h1>
+        <h1>.CHATSECRETS <span class="cursor-blink"></span></h1>
         <div class="terminal-panel">
             <p class="status-line">[BOOT] Secure channel initialized... Dark Mode are recommended.. Screen must be on.. <span class="cursor-blink"></span></h1></p>
             <p class="status-line">[CRYPTO] Fernet encryption active..<span class="cursor-blink"></span></h1></p>
