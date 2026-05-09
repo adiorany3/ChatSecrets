@@ -797,7 +797,12 @@ with st.form("send_message_form", clear_on_submit=True):
     col1, col2 = st.columns([3, 1])
     send = col1.form_submit_button("Send")
     ping = col2.form_submit_button("Ping")
-
+    
+if online_users:
+    st.success(f"Online: {', '.join(online_users)}")
+else:
+    st.info("Belum ada lawan bicara online di room ini.")
+    
 if send and message.strip():
     append_message(room, username, message.strip())
     st.rerun()
