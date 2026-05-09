@@ -766,12 +766,6 @@ st.info(
     f"Session aktif 30 menit. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} "
     f"setiap {refresh_seconds} detik. Suara: {'ON' if sound_enabled else 'OFF'}."
 )
-
-if online_users:
-    st.success(f"Online: {', '.join(online_users)}")
-else:
-    st.info("Belum ada lawan bicara online di room ini.")
-
 render_destroy_room(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
