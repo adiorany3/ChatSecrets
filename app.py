@@ -749,7 +749,7 @@ if auto_refresh_enabled:
     else:
         st.warning("Auto-refresh belum aktif. Jalankan: pip install streamlit-autorefresh")
 
-room = st.text_input("room_name:", placeholder="contoh: black-room-01")
+room = st.text_input("room_name:", placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara")
 username = st.text_input("username:", placeholder="contoh: zero_cool")
 
 if not room or not username:
