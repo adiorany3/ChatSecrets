@@ -1,15 +1,15 @@
-# ChatSecrets - Hacker Terminal Edition
+# ChatSecrets Terminal
 
-Aplikasi chat multi-room rahasia berbasis Streamlit dengan tampilan terminal ala film hacker.
+Private multi-room chat dengan tampilan terminal hacker, enkripsi Fernet, auto-refresh, dan suara pesan masuk.
 
 ## Fitur
 
+- Tema terminal hacker / CRT
 - Multi-room chat
-- Username bebas
-- Status online lawan bicara
-- Pesan terenkripsi menggunakan Fernet
-- Destroy chat room menggunakan kode rahasia
-- UI terminal gelap dengan neon green, scanline CRT, dan font monospace
+- Pesan terenkripsi dengan Fernet
+- Auto-refresh Streamlit
+- Suara notifikasi ketika pesan masuk dari user lain
+- Destroy room dengan kode rahasia
 
 ## Cara Menjalankan
 
@@ -18,6 +18,6 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Catatan Keamanan
+## Catatan Suara
 
-Pesan disimpan di file lokal `chat_rooms.json` dalam bentuk terenkripsi. Gunakan fitur Destroy Chat Room setelah selesai memakai room.
+Browser biasanya memblokir suara otomatis sampai user melakukan interaksi. Setelah masuk room, klik tombol **Unlock Sound** di panel chat satu kali. Setelah itu, pesan masuk dari user lain akan berbunyi otomatis.
