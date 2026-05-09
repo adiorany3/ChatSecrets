@@ -104,7 +104,7 @@ h1 {
 }
 
 h1::before {
-    content: "root@chatsecrets:~$ ";
+    content: "root@AntiTrust:~$ ";
     color: var(--terminal-dim);
     font-size: 0.52em;
 }
