@@ -2,12 +2,16 @@ import json
 import os
 import time
 import uuid
+import html
 from datetime import datetime, timezone, timedelta
 
 import streamlit as st
 from cryptography.fernet import Fernet
-from streamlit_autorefresh import st_autorefresh
-import html
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+except Exception:
+    st_autorefresh = None
 
 
 FERNET_KEY_FILE = "fernet.key"
@@ -291,11 +295,18 @@ if "input_counter" not in st.session_state:
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
-if "auto_refresh_enabled" not in st.session_state:
-    st.session_state.auto_refresh_enabled = True
 
-if "refresh_interval_seconds" not in st.session_state:
-    st.session_state.refresh_interval_seconds = 3
+with st.sidebar:
+    st.markdown("### AUTO REFRESH")
+    auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
+    refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=3, step=1)
+    st.caption("Matikan sementara kalau sedang mengetik pesan panjang.")
+
+if auto_refresh_enabled:
+    if st_autorefresh is not None:
+        st_autorefresh(interval=refresh_seconds * 1000, key="chat_auto_refresh")
+    else:
+        st.warning("Auto-refresh belum aktif. Jalankan: pip install streamlit-autorefresh")
 
 
 st.markdown(
@@ -330,34 +341,7 @@ save_json(ONLINE_FILE, online)
 st.markdown("---")
 st.subheader(f"Room: {room}")
 st.write(f"Login sebagai: `{username}`")
-
-with st.sidebar:
-    st.markdown("### AUTO REFRESH")
-    st.session_state.auto_refresh_enabled = st.toggle(
-        "Aktifkan auto-refresh",
-        value=st.session_state.auto_refresh_enabled,
-        help="Chat akan mengambil pesan terbaru secara otomatis."
-    )
-    st.session_state.refresh_interval_seconds = st.slider(
-        "Interval refresh",
-        min_value=2,
-        max_value=15,
-        value=st.session_state.refresh_interval_seconds,
-        step=1,
-        help="Semakin kecil interval, semakin real-time. Rekomendasi: 3 detik."
-    )
-
-if st.session_state.auto_refresh_enabled:
-    refresh_count = st_autorefresh(
-        interval=st.session_state.refresh_interval_seconds * 1000,
-        key=f"chat_autorefresh_{room}_{username}",
-    )
-    st.caption(
-        f"Auto-refresh aktif setiap {st.session_state.refresh_interval_seconds} detik "
-        f"// pulse #{refresh_count}"
-    )
-else:
-    st.warning("Auto-refresh mati. Gunakan tombol Manual Refresh untuk mengambil pesan terbaru.")
+st.info(f"Session aktif 30 menit. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} setiap {refresh_seconds} detik.")
 
 online_users = [
     user for user, last_seen in online.get(room, {}).items()
@@ -400,33 +384,34 @@ with st.expander("Destroy Chat Room", expanded=False):
 
 messages = load_json(CHAT_FILE).get(room, [])
 
-chat_html = '<div class="chat-box">'
+# Render chat sebagai HTML yang aman.
+# html.escape() mencegah pesan seperti <div> muncul sebagai kode HTML mentah
+# atau merusak struktur tampilan chat.
+chat_parts = ['<div class="chat-box">']
 for msg in messages:
     is_me = msg.get("username") == username
     bubble_class = "chat-bubble me" if is_me else "chat-bubble"
-    decrypted_text = html.escape(decrypt_message(msg.get("text", "")))
-    safe_user = html.escape(msg.get("username", "unknown"))
-    safe_time = html.escape(msg.get("time", ""))
+
+    decrypted_text = decrypt_message(msg.get("text", ""))
+    safe_text = html.escape(decrypted_text).replace("\n", "<br>")
+    safe_user = html.escape(str(msg.get("username", "unknown")))
+    safe_time = html.escape(str(msg.get("time", "")))
     owner = "(Anda)" if is_me else ""
-    chat_html += f"""
+
+    chat_parts.append(f"""
         <div class="{bubble_class}">
-            {decrypted_text}
+            <div class="chat-message-text">{safe_text}</div>
             <div class="chat-meta">{safe_user} {owner} // {safe_time}</div>
         </div>
-    """
-chat_html += "</div>"
-st.markdown(chat_html, unsafe_allow_html=True)
+    """)
+chat_parts.append("</div>")
+st.markdown("".join(chat_parts), unsafe_allow_html=True)
 
 with st.form("send_message_form", clear_on_submit=True):
-    message = st.text_input(
-        "command_message:",
-        placeholder="ketik pesan rahasia...",
-        key=f"message_input_{room}_{username}",
-    )
-    col1, col2, col3 = st.columns([3, 1, 1])
+    message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
+    col1, col2 = st.columns([3, 1])
     send = col1.form_submit_button("Send")
     ping = col2.form_submit_button("Ping")
-    manual_refresh = col3.form_submit_button("Refresh")
 
 if send and message.strip():
     rooms = load_json(CHAT_FILE)
@@ -450,7 +435,7 @@ if ping:
     save_json(CHAT_FILE, rooms)
     st.rerun()
 
-if manual_refresh:
+if st.button("Refresh Chat"):
     st.rerun()
 
-st.caption("Pesan terenkripsi di file lokal. Auto-refresh mengambil pesan terbaru otomatis; destroy room setelah selesai digunakan.")
+st.caption("Pesan terenkripsi di file lokal. Untuk keamanan, destroy room setelah selesai digunakan.")
