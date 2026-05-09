@@ -6,6 +6,7 @@ import html
 from datetime import datetime, timezone, timedelta
 
 import streamlit as st
+import streamlit.components.v1 as components
 from cryptography.fernet import Fernet
 
 try:
@@ -384,28 +385,112 @@ with st.expander("Destroy Chat Room", expanded=False):
 
 messages = load_json(CHAT_FILE).get(room, [])
 
-# Render chat sebagai HTML yang aman.
-# html.escape() mencegah pesan seperti <div> muncul sebagai kode HTML mentah
-# atau merusak struktur tampilan chat.
-chat_parts = ['<div class="chat-box">']
-for msg in messages:
-    is_me = msg.get("username") == username
-    bubble_class = "chat-bubble me" if is_me else "chat-bubble"
+# Render chat memakai components.html, bukan st.markdown.
+# Ini mencegah tag <div> bocor sebagai teks pada pesan kedua dan seterusnya.
+def render_chat_box(chat_messages: list, current_username: str) -> str:
+    chat_parts = []
+    for msg in chat_messages:
+        is_me = msg.get("username") == current_username
+        bubble_class = "chat-bubble me" if is_me else "chat-bubble"
 
-    decrypted_text = decrypt_message(msg.get("text", ""))
-    safe_text = html.escape(decrypted_text).replace("\n", "<br>")
-    safe_user = html.escape(str(msg.get("username", "unknown")))
-    safe_time = html.escape(str(msg.get("time", "")))
-    owner = "(Anda)" if is_me else ""
+        decrypted_text = decrypt_message(msg.get("text", ""))
+        safe_text = html.escape(decrypted_text, quote=True).replace("\n", "<br>")
+        safe_user = html.escape(str(msg.get("username", "unknown")), quote=True)
+        safe_time = html.escape(str(msg.get("time", "")), quote=True)
+        owner = " (Anda)" if is_me else ""
 
-    chat_parts.append(f"""
-        <div class="{bubble_class}">
-            <div class="chat-message-text">{safe_text}</div>
-            <div class="chat-meta">{safe_user} {owner} // {safe_time}</div>
-        </div>
-    """)
-chat_parts.append("</div>")
-st.markdown("".join(chat_parts), unsafe_allow_html=True)
+        chat_parts.append(
+            f'<div class="{bubble_class}">'
+            f'<div class="chat-message-text">{safe_text}</div>'
+            f'<div class="chat-meta">{safe_user}{owner} // {safe_time}</div>'
+            f'</div>'
+        )
+
+    body = "".join(chat_parts) or '<div class="empty-line">[LOG] Belum ada pesan. Kirim command pertama...</div>'
+
+    return f"""
+    <!doctype html>
+    <html>
+    <head>
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+    html, body {{
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: 'Share Tech Mono', monospace;
+    }}
+    .chat-box {{
+        height: 430px;
+        overflow-y: auto;
+        box-sizing: border-box;
+        background: rgba(0, 0, 0, 0.94);
+        border: 1px solid #00ff66;
+        padding: 16px;
+        box-shadow: inset 0 0 24px rgba(0,255,102,.14), 0 0 18px rgba(0,255,102,.2);
+        color: #00ff66;
+    }}
+    .chat-box::before {{
+        content: "CHAT LOG // LIVE FEED";
+        display: block;
+        color: #6dff9a;
+        border-bottom: 1px dashed rgba(0,255,102,.45);
+        padding-bottom: 8px;
+        margin-bottom: 10px;
+        letter-spacing: 1px;
+    }}
+    .chat-bubble {{
+        background: transparent;
+        border-left: 3px solid #00ff66;
+        padding: 10px 12px;
+        margin: 10px 0;
+        color: #00ff66;
+        text-shadow: 0 0 6px rgba(0,255,102,.65);
+        word-wrap: break-word;
+        overflow-wrap: anywhere;
+    }}
+    .chat-bubble::before {{
+        content: "> ";
+        color: #9cffb8;
+    }}
+    .chat-bubble.me {{
+        border-left-color: #00ddff;
+        color: #8ff3ff;
+        text-shadow: 0 0 6px rgba(0,204,255,.65);
+    }}
+    .chat-bubble.me::before {{
+        content: "$ ";
+        color: #8ff3ff;
+    }}
+    .chat-message-text {{
+        display: inline;
+        white-space: normal;
+    }}
+    .chat-meta {{
+        font-size: 12px;
+        color: rgba(120,255,165,.75);
+        margin-top: 6px;
+    }}
+    .empty-line {{
+        color: rgba(120,255,165,.75);
+        margin-top: 14px;
+    }}
+    ::-webkit-scrollbar {{ width: 8px; }}
+    ::-webkit-scrollbar-track {{ background: #000; }}
+    ::-webkit-scrollbar-thumb {{ background: #00ff66; }}
+    </style>
+    </head>
+    <body>
+        <div class="chat-box" id="chatBox">{body}</div>
+        <script>
+            const chatBox = document.getElementById('chatBox');
+            chatBox.scrollTop = chatBox.scrollHeight;
+        </script>
+    </body>
+    </html>
+    """
+
+components.html(render_chat_box(messages, username), height=455, scrolling=False)
 
 with st.form("send_message_form", clear_on_submit=True):
     message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
