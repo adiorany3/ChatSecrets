@@ -1,15 +1,16 @@
-# ChatSecrets Terminal
+# ChatSecrets Hacker Terminal
 
-Private multi-room chat dengan tampilan terminal hacker, enkripsi Fernet, auto-refresh, dan suara pesan masuk.
+Aplikasi chat multi-room berbasis Streamlit dengan tampilan terminal hacker, auto-refresh, enkripsi Fernet, dan suara pesan masuk.
 
 ## Fitur
 
-- Tema terminal hacker / CRT
+- Tampilan terminal hacker / CRT
 - Multi-room chat
 - Pesan terenkripsi dengan Fernet
-- Auto-refresh Streamlit
-- Suara notifikasi ketika pesan masuk dari user lain
-- Destroy room dengan kode rahasia
+- Auto-refresh via `streamlit-autorefresh`
+- Suara pesan masuk ala hacker
+- Tombol `Test Hacker Sound` di sidebar
+- Render chat via `components.html()` agar HTML tidak bocor sebagai teks
 
 ## Cara Menjalankan
 
@@ -20,4 +21,11 @@ streamlit run app.py
 
 ## Catatan Suara
 
-Browser biasanya memblokir suara otomatis sampai user melakukan interaksi. Setelah masuk room, klik tombol **Unlock Sound** di panel chat satu kali. Setelah itu, pesan masuk dari user lain akan berbunyi otomatis.
+Browser modern sering memblokir audio otomatis. Klik tombol **Test Hacker Sound** di sidebar sekali setelah aplikasi terbuka. Setelah itu, pesan masuk dari user lain akan mencoba memutar suara otomatis.
+
+Jika masih belum terdengar:
+
+1. Pastikan volume laptop/browser tidak mute.
+2. Klik ikon izin audio/site settings di browser dan izinkan sound.
+3. Jalankan dari browser desktop, bukan preview terbatas.
+4. Pastikan pesan yang masuk berasal dari username lain, karena pesan sendiri tidak memicu suara.

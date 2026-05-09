@@ -1,9 +1,14 @@
+import base64
 import hashlib
 import html
+import io
 import json
+import math
 import os
+import struct
 import time
 import uuid
+import wave
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -430,9 +435,11 @@ def render_chat_box(
     current_username: str,
     play_incoming_sound: bool,
     sound_enabled: bool,
+    sound_data_uri: str,
 ) -> str:
     body = render_chat_messages(messages, current_username)
     play_flag = "true" if play_incoming_sound else "false"
+    escaped_sound_src = html.escape(sound_data_uri, quote=True)
     sound_panel = """
         <div class="sound-panel" id="soundPanel">
             <span id="soundStatus">[AUDIO] Klik unlock untuk mengaktifkan suara pesan masuk.</span>
@@ -457,6 +464,7 @@ def render_chat_box(
         </div>
         <script>
             const shouldPlay = {play_flag};
+            const beepSrc = "{escaped_sound_src}";
             const chatBox = document.getElementById('chatBox');
             const unlockButton = document.getElementById('unlockSound');
             const soundStatus = document.getElementById('soundStatus');
@@ -470,36 +478,51 @@ def render_chat_box(
             }}
 
             function playHackerTone() {{
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                if (!AudioContext) return;
+                try {{
+                    const audio = new Audio(beepSrc);
+                    audio.volume = 0.75;
+                    const promise = audio.play();
+                    if (promise !== undefined) {{
+                        promise.catch(() => playOscillatorFallback());
+                    }}
+                }} catch (error) {{
+                    playOscillatorFallback();
+                }}
+            }}
 
-                const ctx = new AudioContext();
-                const master = ctx.createGain();
-                master.gain.setValueAtTime(0.0001, ctx.currentTime);
-                master.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.025);
-                master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
-                master.connect(ctx.destination);
+            function playOscillatorFallback() {{
+                try {{
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioContext) return;
 
-                const notes = [740, 990, 520];
-                notes.forEach((frequency, index) => {{
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    const start = ctx.currentTime + index * 0.095;
-                    const end = start + 0.085;
+                    const ctx = new AudioContext();
+                    const master = ctx.createGain();
+                    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+                    master.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.025);
+                    master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
+                    master.connect(ctx.destination);
 
-                    osc.type = index === 1 ? 'square' : 'sawtooth';
-                    osc.frequency.setValueAtTime(frequency, start);
-                    gain.gain.setValueAtTime(0.0001, start);
-                    gain.gain.exponentialRampToValueAtTime(0.36, start + 0.012);
-                    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+                    const notes = [740, 990, 520, 1180];
+                    notes.forEach((frequency, index) => {{
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        const start = ctx.currentTime + index * 0.09;
+                        const end = start + 0.075;
 
-                    osc.connect(gain);
-                    gain.connect(master);
-                    osc.start(start);
-                    osc.stop(end + 0.02);
-                }});
+                        osc.type = index % 2 ? 'square' : 'sawtooth';
+                        osc.frequency.setValueAtTime(frequency, start);
+                        gain.gain.setValueAtTime(0.0001, start);
+                        gain.gain.exponentialRampToValueAtTime(0.32, start + 0.012);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, end);
 
-                setTimeout(() => ctx.close(), 650);
+                        osc.connect(gain);
+                        gain.connect(master);
+                        osc.start(start);
+                        osc.stop(end + 0.02);
+                    }});
+
+                    setTimeout(() => ctx.close(), 700);
+                }} catch (error) {{}}
             }}
 
             if (unlockButton) {{
@@ -529,6 +552,110 @@ def append_message(room: str, username: str, message_text: str) -> None:
     save_json(CHAT_FILE, rooms)
 
 
+
+# ==============================
+# AUDIO HELPERS
+# ==============================
+def build_hacker_wav_data_uri() -> str:
+    """Generate a short hacker-style beep as an inline WAV data URI.
+
+    This avoids relying on external audio files and works offline.
+    """
+    sample_rate = 44100
+    notes = [740, 990, 520, 1180]
+    note_duration = 0.085
+    gap_duration = 0.025
+    volume = 0.28
+
+    samples: list[int] = []
+    for note_index, frequency in enumerate(notes):
+        total_note_samples = int(sample_rate * note_duration)
+        for i in range(total_note_samples):
+            t = i / sample_rate
+            # quick attack and release, so the sound feels like a terminal alert
+            attack = min(1.0, i / max(1, int(sample_rate * 0.012)))
+            release = min(1.0, (total_note_samples - i) / max(1, int(sample_rate * 0.025)))
+            envelope = max(0.0, min(attack, release))
+
+            # mix sine + slight square-ish harmonic for a digital tone
+            sine = math.sin(2 * math.pi * frequency * t)
+            harmonic = 0.35 * math.sin(2 * math.pi * frequency * 2 * t)
+            value = int(32767 * volume * envelope * (sine + harmonic) / 1.35)
+            samples.append(value)
+
+        samples.extend([0] * int(sample_rate * gap_duration))
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"".join(struct.pack("<h", sample) for sample in samples))
+
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:audio/wav;base64,{encoded}"
+
+
+HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
+
+
+def render_page_sound_trigger(sound_data_uri: str) -> str:
+    """Play sound from a tiny page-level component as a fallback.
+
+    Streamlit re-creates the chat iframe on rerun, so this trigger helps the
+    audio play even when the chat component's previous AudioContext was lost.
+    """
+    escaped_src = html.escape(sound_data_uri, quote=True)
+    return f"""
+    <!doctype html>
+    <html>
+    <body style="margin:0;padding:0;background:transparent;">
+        <audio id="incomingSound" src="{escaped_src}" preload="auto" autoplay></audio>
+        <script>
+            const audio = document.getElementById('incomingSound');
+            audio.volume = 0.75;
+
+            function webAudioFallback() {{
+                try {{
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioContext) return;
+                    const ctx = new AudioContext();
+                    const master = ctx.createGain();
+                    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+                    master.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.025);
+                    master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
+                    master.connect(ctx.destination);
+
+                    [740, 990, 520, 1180].forEach((frequency, index) => {{
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        const start = ctx.currentTime + index * 0.09;
+                        const end = start + 0.075;
+                        osc.type = index % 2 ? 'square' : 'sawtooth';
+                        osc.frequency.setValueAtTime(frequency, start);
+                        gain.gain.setValueAtTime(0.0001, start);
+                        gain.gain.exponentialRampToValueAtTime(0.3, start + 0.012);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, end);
+                        osc.connect(gain);
+                        gain.connect(master);
+                        osc.start(start);
+                        osc.stop(end + 0.02);
+                    }});
+                    setTimeout(() => ctx.close(), 700);
+                }} catch (error) {{}}
+            }}
+
+            const playPromise = audio.play();
+            if (playPromise !== undefined) {{
+                playPromise.catch(() => webAudioFallback());
+            }} else {{
+                webAudioFallback();
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
 # ==============================
 # UI HELPERS
 # ==============================
@@ -547,16 +674,17 @@ def render_header() -> None:
     )
 
 
-def render_sidebar() -> tuple[bool, int, bool]:
+def render_sidebar() -> tuple[bool, int, bool, bool]:
     with st.sidebar:
         st.markdown("### SYSTEM CONTROL")
         auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
         refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=3, step=1)
         sound_enabled = st.toggle("Suara pesan masuk", value=True)
-        st.caption("Untuk suara, klik tombol Unlock Sound di panel chat satu kali.")
+        test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
+        st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
 
-    return auto_refresh_enabled, refresh_seconds, sound_enabled
+    return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
 def update_online_status(room: str, username: str) -> list[str]:
@@ -613,7 +741,7 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
 render_header()
-auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
+auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested = render_sidebar()
 
 if auto_refresh_enabled:
     if st_autorefresh is not None:
@@ -650,10 +778,19 @@ messages = load_json(CHAT_FILE).get(room, [])
 play_incoming_sound = should_play_incoming_sound(messages, username, sound_enabled)
 
 components.html(
-    render_chat_box(messages, username, play_incoming_sound, sound_enabled),
+    render_chat_box(messages, username, play_incoming_sound, sound_enabled, HACKER_SOUND_DATA_URI),
     height=455,
     scrolling=False,
 )
+
+if sound_enabled and (play_incoming_sound or test_sound_requested):
+    components.html(
+        render_page_sound_trigger(HACKER_SOUND_DATA_URI),
+        height=0,
+        scrolling=False,
+    )
+    if test_sound_requested:
+        st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
 
 with st.form("send_message_form", clear_on_submit=True):
     message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
