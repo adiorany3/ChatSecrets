@@ -806,7 +806,4 @@ if ping:
     append_message(room, username, "PING!")
     st.rerun()
 
-if st.button("Refresh Chat"):
-    st.rerun()
-
 st.caption("Pesan terenkripsi di file lokal. Untuk keamanan, destroy room setelah selesai digunakan.")
