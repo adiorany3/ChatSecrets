@@ -26,7 +26,7 @@ except Exception:
 # CONFIG
 # ==============================
 APP_TITLE = "ChatSecrets Terminal"
-APP_ICON = "🟢"
+APP_ICON = "<span class="cursor-blink"></span></h1>🟢"
 FERNET_KEY_FILE = "fernet.key"
 CHAT_FILE = "chat_rooms.json"
 ONLINE_FILE = "online_status.json"
