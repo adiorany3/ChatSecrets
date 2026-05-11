@@ -141,6 +141,21 @@ h1::before {
   box-shadow: 0 0 24px rgba(0,255,102,.85);
 }
 
+.panic-panel {
+  border: 1px solid var(--terminal-danger);
+  background: rgba(255, 39, 95, .08);
+  box-shadow: 0 0 20px rgba(255, 39, 95, .22);
+  padding: 14px;
+  margin: 12px 0 18px 0;
+}
+.panic-title {
+  color: var(--terminal-danger);
+  text-shadow: 0 0 10px rgba(255, 39, 95, .75);
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+.panic-copy { color: #ff9ab6; margin: 6px 0 0 0; }
+
 .stAlert {
   background: rgba(0,25,8,.88) !important;
   color: var(--terminal-green) !important;
@@ -708,20 +723,27 @@ def render_destroy_room(room: str) -> None:
 
 
 def render_panic_destroy(room: str) -> None:
-    st.markdown("### PANIC CONTROL")
-    st.caption("Tombol ini langsung menghapus semua pesan teks, gambar, dan voice di room aktif. Room, username, status online, dan setting auto-destroy tetap ada.")
+    st.markdown(
+        """
+        <div class="panic-panel">
+          <div class="panic-title">[PANIC CONTROL] DESTROY PESAN ROOM AKTIF</div>
+          <p class="panic-copy">Tekan tombol panic untuk menghapus semua pesan teks, gambar, dan voice packet di room ini. Room, user online, dan setting auto-destroy tetap disimpan.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     col_panic, col_status = st.columns([1, 2])
     with col_panic:
-        panic_pressed = st.button("☢ PANIC DESTROY PESAN", type="primary", key="panic_destroy_messages")
+        panic_pressed = st.button("🚨 PANIC DESTROY PESAN", type="primary", key="panic_destroy_messages", use_container_width=True)
     with col_status:
-        st.warning("Gunakan saat darurat. Aksi ini tidak bisa di-undo.")
+        st.warning("Gunakan saat darurat. Aksi ini langsung mengosongkan chat dan tidak bisa di-undo.")
 
     if panic_pressed:
         deleted_count = destroy_room_messages(room)
         reset_media_packet("image_packet")
         reset_media_packet("voice_record_packet")
         reset_media_packet("voice_upload_packet")
-        st.success(f"Panic destroy aktif. {deleted_count} pesan di room `{room}` sudah dihapus.")
+        st.success(f"Panic destroy berhasil. {deleted_count} pesan di room `{room}` sudah dihapus.")
         st.rerun()
 
 
@@ -854,8 +876,8 @@ else:
         f"pesan akan dihancurkan otomatis setelah batas waktu tersebut."
     )
 
-render_destroy_room(room)
 render_panic_destroy(room)
+render_destroy_room(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
 components.html(render_chat_box(messages, username), height=495, scrolling=False)
@@ -868,5 +890,5 @@ else:
 render_message_composer(room, username)
 
 st.caption(
-    "Pesan teks, gambar, dan suara terenkripsi di file lokal. Untuk keamanan, pilih auto-destroy atau gunakan Destroy Chat Room setelah selesai."
+    "Pesan teks, gambar, dan suara terenkripsi di file lokal. Untuk keamanan, pilih auto-destroy, gunakan Panic Destroy Pesan, atau Destroy Chat Room setelah selesai."
 )
