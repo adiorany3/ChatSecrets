@@ -764,69 +764,185 @@ def latest_foreign_message_signature(messages: list[dict[str, Any]], username: s
     return ""
 
 
+def render_hacker_sound_runtime(show_unlock_button: bool = True) -> None:
+    """Install a reusable browser-side sound runtime and optionally show an unlock/test button."""
+    button_html = """
+      <button id="unlockSound" class="sound-btn">UNLOCK / TEST SOUND</button>
+      <span id="soundState" class="sound-state">sound=standby</span>
+    """ if show_unlock_button else """<span id="soundState" class="sound-state">sound=armed</span>"""
+
+    components.html(
+        f"""
+        <style>
+          body {{ margin: 0; background: transparent; font-family: 'Share Tech Mono', monospace; }}
+          .sound-wrap {{ display: flex; align-items: center; gap: 8px; color: #00ff66; }}
+          .sound-btn {{
+            cursor: pointer;
+            border: 1px solid rgba(0,255,102,.85);
+            background: #020b04;
+            color: #00ff66;
+            padding: 7px 10px;
+            border-radius: 4px;
+            font-family: 'Share Tech Mono', monospace;
+            box-shadow: 0 0 10px rgba(0,255,102,.18);
+          }}
+          .sound-btn:hover {{ background: rgba(0,255,102,.12); }}
+          .sound-state {{ font-size: 12px; color: rgba(0,255,102,.75); }}
+        </style>
+        <div class="sound-wrap">{button_html}</div>
+        <script>
+        (function () {{
+          function getRoot() {{
+            try {{
+              if (window.parent && window.parent !== window) return window.parent;
+            }} catch (error) {{}}
+            return window;
+          }}
+
+          const root = getRoot();
+          const storage = (() => {{
+            try {{ return root.localStorage || window.localStorage; }} catch (error) {{ return null; }}
+          }})();
+          const AudioContextClass = root.AudioContext || root.webkitAudioContext || window.AudioContext || window.webkitAudioContext;
+
+          function isUnlocked() {{
+            try {{
+              return root.__chatsecretsSoundUnlocked === true ||
+                     (storage && storage.getItem("chatsecrets_sound_unlocked") === "1");
+            }} catch (error) {{
+              return root.__chatsecretsSoundUnlocked === true;
+            }}
+          }}
+
+          function markUnlocked() {{
+            root.__chatsecretsSoundUnlocked = true;
+            try {{ if (storage) storage.setItem("chatsecrets_sound_unlocked", "1"); }} catch (error) {{}}
+          }}
+
+          function getContext() {{
+            if (!AudioContextClass) return null;
+            if (!root.__chatsecretsAudioContext) {{
+              root.__chatsecretsAudioContext = new AudioContextClass();
+            }}
+            return root.__chatsecretsAudioContext;
+          }}
+
+          async function playHackerBeep(forceUnlock) {{
+            try {{
+              const ctx = getContext();
+              if (!ctx) return false;
+
+              if (forceUnlock) markUnlocked();
+              if (ctx.state === "suspended") await ctx.resume();
+              if (ctx.state === "suspended") return false;
+              if (!forceUnlock && !isUnlocked()) return false;
+
+              const now = ctx.currentTime + 0.025;
+              const master = ctx.createGain();
+              master.gain.setValueAtTime(0.0001, now);
+              master.gain.exponentialRampToValueAtTime(0.10, now + 0.018);
+              master.gain.exponentialRampToValueAtTime(0.0001, now + 0.90);
+              master.connect(ctx.destination);
+
+              const sequence = [
+                {{ f: 740,  t: 0.00, d: 0.075, type: "square" }},
+                {{ f: 1110, t: 0.08, d: 0.065, type: "square" }},
+                {{ f: 1480, t: 0.16, d: 0.070, type: "sawtooth" }},
+                {{ f: 620,  t: 0.29, d: 0.090, type: "square" }},
+                {{ f: 930,  t: 0.40, d: 0.110, type: "triangle" }}
+              ];
+
+              sequence.forEach((note) => {{
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                const start = now + note.t;
+                const end = start + note.d;
+
+                osc.type = note.type;
+                osc.frequency.setValueAtTime(note.f, start);
+                osc.frequency.exponentialRampToValueAtTime(Math.max(50, note.f * 0.66), end);
+
+                gain.gain.setValueAtTime(0.0001, start);
+                gain.gain.exponentialRampToValueAtTime(0.50, start + 0.010);
+                gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+                osc.connect(gain);
+                gain.connect(master);
+                osc.start(start);
+                osc.stop(end + 0.03);
+              }});
+
+              const length = Math.floor(ctx.sampleRate * 0.10);
+              const noiseBuffer = ctx.createBuffer(1, length, ctx.sampleRate);
+              const output = noiseBuffer.getChannelData(0);
+              for (let i = 0; i < length; i++) output[i] = (Math.random() * 2 - 1) * 0.16;
+
+              const noise = ctx.createBufferSource();
+              const noiseGain = ctx.createGain();
+              noise.buffer = noiseBuffer;
+              noiseGain.gain.setValueAtTime(0.0001, now + 0.53);
+              noiseGain.gain.exponentialRampToValueAtTime(0.10, now + 0.55);
+              noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.66);
+              noise.connect(noiseGain);
+              noiseGain.connect(master);
+              noise.start(now + 0.53);
+              noise.stop(now + 0.68);
+              return true;
+            }} catch (error) {{
+              return false;
+            }}
+          }}
+
+          root.__chatsecretsPlayHackerSound = playHackerBeep;
+          root.__chatsecretsUnlockHackerSound = async function () {{
+            markUnlocked();
+            return await playHackerBeep(true);
+          }};
+
+          const state = document.getElementById("soundState");
+          const button = document.getElementById("unlockSound");
+          function refreshState() {{
+            if (!state) return;
+            state.textContent = isUnlocked() ? "sound=unlocked" : "sound=locked_click_unlock";
+          }}
+
+          refreshState();
+          if (button) {{
+            button.addEventListener("click", async function () {{
+              button.disabled = true;
+              button.textContent = "TESTING...";
+              const ok = await root.__chatsecretsUnlockHackerSound();
+              button.textContent = ok ? "SOUND ARMED" : "CLICK AGAIN";
+              button.disabled = false;
+              refreshState();
+            }});
+          }}
+        }})();
+        </script>
+        """,
+        height=48 if show_unlock_button else 22,
+    )
+
+
 def render_hacker_sound_alert() -> None:
-    """Play a short terminal-style synth alert for a newly received message."""
+    """Ask the browser-side runtime to play a short terminal-style synth alert."""
     components.html(
         """
         <script>
         (async function () {
-          try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-
-            const ctx = new AudioContext();
-            if (ctx.state === "suspended") await ctx.resume();
-
-            const master = ctx.createGain();
-            master.gain.setValueAtTime(0.0001, ctx.currentTime);
-            master.gain.exponentialRampToValueAtTime(0.075, ctx.currentTime + 0.018);
-            master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.82);
-            master.connect(ctx.destination);
-
-            const sequence = [
-              { f: 880,  t: 0.00, d: 0.09, type: "square" },
-              { f: 1320, t: 0.10, d: 0.07, type: "square" },
-              { f: 1760, t: 0.18, d: 0.08, type: "sawtooth" },
-              { f: 660,  t: 0.31, d: 0.10, type: "square" },
-              { f: 990,  t: 0.43, d: 0.12, type: "triangle" }
-            ];
-
-            sequence.forEach((note) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              const start = ctx.currentTime + note.t;
-              const end = start + note.d;
-
-              osc.type = note.type;
-              osc.frequency.setValueAtTime(note.f, start);
-              osc.frequency.exponentialRampToValueAtTime(Math.max(40, note.f * 0.62), end);
-
-              gain.gain.setValueAtTime(0.0001, start);
-              gain.gain.exponentialRampToValueAtTime(0.55, start + 0.012);
-              gain.gain.exponentialRampToValueAtTime(0.0001, end);
-
-              osc.connect(gain);
-              gain.connect(master);
-              osc.start(start);
-              osc.stop(end + 0.02);
-            });
-
-            const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
-            const output = noiseBuffer.getChannelData(0);
-            for (let i = 0; i < output.length; i++) output[i] = (Math.random() * 2 - 1) * 0.18;
-            const noise = ctx.createBufferSource();
-            const noiseGain = ctx.createGain();
-            noise.buffer = noiseBuffer;
-            noiseGain.gain.setValueAtTime(0.0001, ctx.currentTime + 0.55);
-            noiseGain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.57);
-            noiseGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.68);
-            noise.connect(noiseGain);
-            noiseGain.connect(master);
-            noise.start(ctx.currentTime + 0.55);
-            noise.stop(ctx.currentTime + 0.70);
-          } catch (error) {
-            // Browser may block audio until the user interacts with the page.
+          function getRoot() {
+            try {
+              if (window.parent && window.parent !== window) return window.parent;
+            } catch (error) {}
+            return window;
           }
+
+          const root = getRoot();
+          try {
+            if (typeof root.__chatsecretsPlayHackerSound === "function") {
+              await root.__chatsecretsPlayHackerSound(false);
+            }
+          } catch (error) {}
         })();
         </script>
         """,
@@ -854,6 +970,9 @@ def render_sidebar() -> tuple[bool, int, bool]:
         auto_refresh_enabled = st.toggle("auto_refresh", value=True)
         refresh_seconds = st.slider("refresh_sec", min_value=2, max_value=15, value=5, step=1)
         sound_enabled = st.toggle("hacker_sound", value=True, help="Putar efek suara terminal saat ada pesan baru masuk dari user lain.")
+        if sound_enabled:
+            render_hacker_sound_runtime(show_unlock_button=True)
+            st.caption("Klik UNLOCK / TEST SOUND sekali jika browser memblokir audio.")
         st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB")
     return auto_refresh_enabled, refresh_seconds, sound_enabled
 
@@ -1028,6 +1147,8 @@ if destroyed_rooms:
     st.warning("Auto-destroy menjalankan purge untuk room: " + ", ".join(destroyed_rooms))
 
 auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
+if sound_enabled:
+    render_hacker_sound_runtime(show_unlock_button=False)
 if auto_refresh_enabled:
     if st_autorefresh is not None:
         st_autorefresh(interval=refresh_seconds * 1000, key="chat_auto_refresh")
