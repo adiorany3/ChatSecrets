@@ -379,6 +379,16 @@ def destroy_room(room: str) -> None:
     save_json(ROOM_SETTINGS_FILE, settings)
 
 
+def destroy_room_messages(room: str) -> int:
+    """Immediately remove every text/image/voice message from the active room."""
+    rooms = load_json(CHAT_FILE)
+    message_count = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
+    rooms[room] = []
+    save_json(CHAT_FILE, rooms)
+    mark_room_active(room)
+    return message_count
+
+
 def get_active_users_from_online(online: dict[str, Any], room: str, now: int) -> dict[str, int]:
     active: dict[str, int] = {}
     for user, last_seen in online.get(room, {}).items():
@@ -630,6 +640,7 @@ def render_header() -> None:
           <p class="status-line">[MODE] Private multi-room communication...</p>
           <p class="status-line">[MEDIA] Image packet + voice packet enabled...</p>
           <p class="status-line">[PURGE] Auto-destroy tersedia: Never / 10 / 20 / 30 / 40 / 50 / 60 menit...</p>
+          <p class="status-line">[PANIC] Panic destroy pesan room aktif siap digunakan...</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -694,6 +705,24 @@ def render_destroy_room(room: str) -> None:
                 st.stop()
             else:
                 st.error("Kode destroy salah.")
+
+
+def render_panic_destroy(room: str) -> None:
+    st.markdown("### PANIC CONTROL")
+    st.caption("Tombol ini langsung menghapus semua pesan teks, gambar, dan voice di room aktif. Room, username, status online, dan setting auto-destroy tetap ada.")
+    col_panic, col_status = st.columns([1, 2])
+    with col_panic:
+        panic_pressed = st.button("☢ PANIC DESTROY PESAN", type="primary", key="panic_destroy_messages")
+    with col_status:
+        st.warning("Gunakan saat darurat. Aksi ini tidak bisa di-undo.")
+
+    if panic_pressed:
+        deleted_count = destroy_room_messages(room)
+        reset_media_packet("image_packet")
+        reset_media_packet("voice_record_packet")
+        reset_media_packet("voice_upload_packet")
+        st.success(f"Panic destroy aktif. {deleted_count} pesan di room `{room}` sudah dihapus.")
+        st.rerun()
 
 
 def reset_media_packet(packet_name: str) -> None:
@@ -826,6 +855,7 @@ else:
     )
 
 render_destroy_room(room)
+render_panic_destroy(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
 components.html(render_chat_box(messages, username), height=495, scrolling=False)
