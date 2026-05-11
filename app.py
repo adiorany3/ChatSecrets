@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import html
 import json
 import os
@@ -403,7 +402,6 @@ def get_room_config(room: str) -> dict[str, Any]:
         "destroy_mode": "never" if minutes is None else "auto",
         "auto_destroy_minutes": minutes,
         "last_active_at": int(config.get("last_active_at", epoch_now())),
-        "destroy_code_hash": config.get("destroy_code_hash", ""),
     }
 
 
@@ -428,26 +426,7 @@ def mark_room_active(room: str) -> None:
     save_room_config(room, config)
 
 
-def hash_destroy_code(room: str, code: str) -> str:
-    raw = f"{room}:{code}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def destroy_room(room: str) -> None:
-    rooms = load_json(CHAT_FILE)
-    rooms.pop(room, None)
-    save_json(CHAT_FILE, rooms)
-
-    online = load_json(ONLINE_FILE)
-    online.pop(room, None)
-    save_json(ONLINE_FILE, online)
-
-    settings = load_json(ROOM_SETTINGS_FILE)
-    settings.pop(room, None)
-    save_json(ROOM_SETTINGS_FILE, settings)
-
-
-def destroy_room_messages(room: str) -> int:
+def panic_clear_messages(room: str) -> int:
     """Immediately remove every text/image/voice message from the active room."""
     rooms = load_json(CHAT_FILE)
     message_count = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
@@ -498,7 +477,7 @@ def purge_inactive_rooms() -> list[str]:
             changed = True
             continue
 
-        # Never = hanya bisa dihapus manual via Destroy Room.
+        # Never = pesan tidak dihapus otomatis; gunakan Panic Destroy bila diperlukan.
         if minutes is None:
             settings[room] = config
             continue
@@ -630,7 +609,7 @@ def looks_like_shell_payload(data: bytes) -> bool:
 
 
 def security_destroy_for_disguised_image(room: str) -> None:
-    deleted_count = destroy_room_messages(room)
+    deleted_count = panic_clear_messages(room)
     reset_media_packet("image_packet")
     st.error(
         "SECURITY ALERT: Image Packet terdeteksi sebagai file shell/script yang menyamar. "
@@ -987,7 +966,7 @@ def render_auto_destroy_control(room: str) -> str:
         "auto_destroy_idle:",
         options=AUTO_DESTROY_CHOICES,
         index=AUTO_DESTROY_CHOICES.index(current_choice),
-        help="Default 30 menit. Pilih Never jika room hanya ingin dihancurkan manual lewat Destroy Room.",
+        help="Default 30 menit. Pilih Never jika pesan hanya ingin dihancurkan lewat Panic Destroy.",
     )
 
     if choice != current_choice:
@@ -995,35 +974,6 @@ def render_auto_destroy_control(room: str) -> str:
         st.success(f"Auto Destroy untuk room `{room}` diubah menjadi: {choice}")
 
     return choice
-
-
-def render_destroy_room(room: str) -> None:
-    with st.expander("destroy_room", expanded=False):
-        config = get_room_config(room)
-        stored_hash = str(config.get("destroy_code_hash", ""))
-
-        st.caption("destroy_code_hash=enabled")
-        new_secret = st.text_input("set_destroy_code:", type="password", key="new_destroy_code")
-        if st.button("SET CODE"):
-            if len(new_secret) >= 6:
-                config["destroy_code_hash"] = hash_destroy_code(room, new_secret)
-                save_room_config(room, config)
-                st.success("Kode destroy berhasil disimpan untuk room ini.")
-            else:
-                st.error("Kode destroy minimal 6 karakter.")
-
-        destroy_key = st.text_input("destroy_code:", type="password", key="destroy_key_input")
-        if st.button("DESTROY ROOM", type="primary"):
-            if not stored_hash and not config.get("destroy_code_hash"):
-                st.error("Kode destroy belum diset untuk room ini.")
-                return
-            latest_hash = str(get_room_config(room).get("destroy_code_hash", ""))
-            if destroy_key and hash_destroy_code(room, destroy_key) == latest_hash:
-                destroy_room(room)
-                st.success("Chat room berhasil dihancurkan. Refresh halaman untuk mulai ulang.")
-                st.stop()
-            else:
-                st.error("Kode destroy salah.")
 
 
 def render_panic_destroy(room: str) -> None:
@@ -1039,7 +989,7 @@ def render_panic_destroy(room: str) -> None:
     panic_pressed = st.button("PANIC DESTROY", type="primary", key="panic_destroy_messages", use_container_width=True)
 
     if panic_pressed:
-        deleted_count = destroy_room_messages(room)
+        deleted_count = panic_clear_messages(room)
         reset_media_packet("image_packet")
         reset_media_packet("voice_record_packet")
         reset_media_packet("voice_upload_packet")
@@ -1173,12 +1123,11 @@ auto_destroy_choice = render_auto_destroy_control(room)
 online_users = update_online_status(room, username)
 
 if auto_destroy_choice == "Never":
-    st.info("auto_destroy=never | manual_destroy_only=true")
+    st.info("auto_destroy=never | panic_destroy_only=true")
 else:
     st.info(f"auto_destroy={auto_destroy_choice} | trigger=no_active_user")
 
 render_panic_destroy(room)
-render_destroy_room(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
 
