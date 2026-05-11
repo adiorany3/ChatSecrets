@@ -8,6 +8,7 @@ import struct
 import time
 import uuid
 import wave
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -38,6 +39,13 @@ AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "40 menit",
 MAX_MEDIA_BYTES = 8 * 1024 * 1024  # 8 MB per media message
 ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 ALLOWED_AUDIO_TYPES = ["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]
+ALLOWED_DOCUMENT_TYPES = ["pdf", "docx", "xlsx", "pptx"]
+DOCUMENT_MIME_BY_EXT = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 SHELL_SIGNATURES = [
     b"#!/bin/sh",
     b"#!/bin/bash",
@@ -322,6 +330,17 @@ html, body {
   width: min(100%, 420px);
   filter: sepia(1) saturate(3) hue-rotate(70deg);
 }
+.chat-doc {
+  display: inline-block;
+  border: 1px solid rgba(0,255,102,.7);
+  padding: 7px 10px;
+  color: #00ff66;
+  text-decoration: none;
+  background: rgba(0,255,102,.055);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.chat-doc:hover { background: rgba(0,255,102,.16); }
 .empty-line { color: rgba(140,255,174,.75); margin-top: 10px; }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #000; }
@@ -622,6 +641,81 @@ def security_destroy_for_disguised_image(room: str) -> None:
     st.rerun()
 
 
+def get_file_extension(filename: str) -> str:
+    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+def detect_document_format(data: bytes) -> str | None:
+    """Return supported document format from magic/header checks."""
+    if data.startswith(b"%PDF-"):
+        return "pdf"
+
+    if not data.startswith(b"PK"):
+        return None
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zipped:
+            names = set(zipped.namelist())
+            lowered = {name.lower() for name in names}
+            if "[content_types].xml" not in lowered:
+                return None
+
+            # Block obvious risky/path-traversal entries. OOXML files should not need these.
+            for name in names:
+                normalized = name.replace("\\", "/")
+                lowered_name = normalized.lower()
+                if normalized.startswith("/") or "../" in normalized or lowered_name.endswith((".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".exe", ".dll")):
+                    return None
+
+            if any(name.startswith("word/") for name in lowered):
+                return "docx"
+            if any(name.startswith("xl/") for name in lowered):
+                return "xlsx"
+            if any(name.startswith("ppt/") for name in lowered):
+                return "pptx"
+    except zipfile.BadZipFile:
+        return None
+
+    return None
+
+
+def validate_document_file(uploaded_file: Any) -> tuple[bytes, str, str] | None:
+    if uploaded_file is None:
+        st.error("Document Packet belum dipilih.")
+        return None
+
+    data = uploaded_file.getvalue()
+    if not data:
+        st.error("File dokumen kosong atau gagal dibaca.")
+        return None
+
+    if len(data) > MAX_MEDIA_BYTES:
+        st.error(f"Ukuran dokumen terlalu besar. Maksimal {MAX_MEDIA_BYTES // (1024 * 1024)} MB per dokumen.")
+        return None
+
+    filename = getattr(uploaded_file, "name", "document_packet") or "document_packet"
+    extension = get_file_extension(filename)
+
+    if extension not in ALLOWED_DOCUMENT_TYPES:
+        st.error("Document Packet hanya menerima PDF, DOCX, XLSX, dan PPTX. File script/shell tidak diizinkan.")
+        return None
+
+    if looks_like_shell_payload(data):
+        st.error("SECURITY BLOCK: Dokumen terindikasi shell/script. Payload diblokir dan tidak disimpan.")
+        return None
+
+    real_format = detect_document_format(data)
+    if real_format is None:
+        st.error("Document Packet tidak valid. File harus PDF atau Office Open XML asli, bukan file yang menyamar.")
+        return None
+
+    if real_format != extension:
+        st.error(f"SECURITY BLOCK: Ekstensi .{extension} tidak cocok dengan format asli .{real_format}. Payload diblokir.")
+        return None
+
+    return data, DOCUMENT_MIME_BY_EXT[real_format], filename
+
+
 def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | None = None) -> tuple[bytes, str, str] | None:
     if uploaded_file is None:
         st.error("File belum dipilih.")
@@ -691,6 +785,12 @@ def render_media_payload(msg: dict[str, Any]) -> str:
         <audio class="chat-audio" controls preload="metadata" src="data:{mime_type};base64,{safe_payload}"></audio>
         """
 
+    if msg_type == "document":
+        return f"""
+        <span class="media-label">[DOCUMENT_PACKET] {filename}</span>
+        <a class="chat-doc" href="data:{mime_type};base64,{safe_payload}" download="{filename}">DOWNLOAD_DOCUMENT :: {filename}</a>
+        """
+
     return '<span class="media-label">[UNKNOWN_PACKET] Format pesan tidak dikenal.</span>'
 
 
@@ -748,43 +848,25 @@ def latest_foreign_message_signature(messages: list[dict[str, Any]], username: s
 
 @st.cache_data(show_spinner=False)
 def hacker_beep_wav_bytes() -> bytes:
-    # Generate a short terminal-style beep as a WAV file. No external audio asset needed.
+    # Short “ding” notification. Kept internal as WAV; no external audio asset needed.
     sample_rate = 44100
-    duration = 0.82
+    duration = 0.22
     total_samples = int(sample_rate * duration)
-    notes = [
-        (0.00, 0.08, 740.0, "square", 0.55),
-        (0.09, 0.07, 1110.0, "square", 0.48),
-        (0.17, 0.08, 1480.0, "saw", 0.42),
-        (0.30, 0.10, 620.0, "square", 0.52),
-        (0.43, 0.12, 930.0, "triangle", 0.46),
-    ]
-
     samples: list[int] = []
+
     for i in range(total_samples):
         t = i / sample_rate
         value = 0.0
-        for start, length, freq, wave_type, gain in notes:
-            if start <= t < start + length:
-                local = (t - start) / length
-                attack = min(1.0, local / 0.13)
-                decay = max(0.0, 1.0 - local) ** 1.7
-                envelope = attack * decay
-                phase = (t - start) * freq
-                if wave_type == "square":
-                    raw = 1.0 if math.sin(2 * math.pi * phase) >= 0 else -1.0
-                elif wave_type == "saw":
-                    raw = 2.0 * (phase - math.floor(phase + 0.5))
-                else:
-                    raw = 2.0 * abs(2.0 * (phase - math.floor(phase + 0.5))) - 1.0
-                value += raw * gain * envelope
 
-        if 0.56 <= t < 0.68:
-            local = (t - 0.56) / 0.12
-            envelope = (1.0 - local) ** 2
-            pseudo_noise = math.sin(i * 12.9898) * 43758.5453
-            pseudo_noise = (pseudo_noise - math.floor(pseudo_noise)) * 2 - 1
-            value += pseudo_noise * 0.16 * envelope
+        # Clean short ding: fast attack, quick decay, light harmonic.
+        envelope = min(1.0, t / 0.012) * max(0.0, 1.0 - (t / duration)) ** 2.8
+        value += math.sin(2 * math.pi * 1568.0 * t) * 0.58 * envelope
+        value += math.sin(2 * math.pi * 2093.0 * t) * 0.22 * envelope
+
+        # Tiny click transient so the notification is perceptible but not long.
+        if t < 0.018:
+            click_env = 1.0 - (t / 0.018)
+            value += math.sin(2 * math.pi * 3136.0 * t) * 0.16 * click_env
 
         value = max(-1.0, min(1.0, value))
         samples.append(int(value * 32767))
@@ -796,7 +878,6 @@ def hacker_beep_wav_bytes() -> bytes:
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(b"".join(struct.pack("<h", sample) for sample in samples))
     return buffer.getvalue()
-
 
 def hacker_beep_data_uri() -> str:
     return "data:audio/wav;base64," + base64.b64encode(hacker_beep_wav_bytes()).decode("ascii")
@@ -883,7 +964,7 @@ def render_header() -> None:
         """
         <h1>./chatsecrets --stealth <span class="cursor-blink"></span></h1>
         <div class="terminal-bar">
-          <p class="terminal-line">encrypted_room=on | media_packet=on | hacker_sound=armed | panic_destroy=armed | shell_image_guard=on</p>
+          <p class="terminal-line">encrypted_room=on | media_packet=on | document_packet=on | hacker_sound=ding | panic_destroy=armed | shell_guard=on</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -899,7 +980,7 @@ def render_sidebar() -> tuple[bool, int, bool]:
         if sound_enabled:
             render_hacker_sound_test_button()
             st.caption("Klik TEST SOUND untuk memastikan tab/browser mengizinkan audio.")
-        st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB")
+        st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB | doc=pdf/docx/xlsx/pptx")
     return auto_refresh_enabled, refresh_seconds, sound_enabled
 
 
@@ -940,6 +1021,7 @@ def render_panic_destroy(room: str) -> None:
         reset_media_packet("image_packet")
         reset_media_packet("voice_record_packet")
         reset_media_packet("voice_upload_packet")
+        reset_media_packet("document_packet")
         st.success(f"panic_destroy=success | deleted={deleted_count} | room={room}")
         st.rerun()
 
@@ -958,6 +1040,7 @@ def render_message_composer(room: str, username: str) -> None:
     image_nonce = int(st.session_state.get("image_packet_nonce", 0))
     voice_record_nonce = int(st.session_state.get("voice_record_packet_nonce", 0))
     voice_upload_nonce = int(st.session_state.get("voice_upload_packet_nonce", 0))
+    document_nonce = int(st.session_state.get("document_packet_nonce", 0))
 
     with st.form("send_message_form", clear_on_submit=True):
         message = st.text_input("msg:", placeholder="type encrypted message...")
@@ -973,7 +1056,7 @@ def render_message_composer(room: str, username: str) -> None:
         append_text_message(room, username, "PING!")
         st.rerun()
 
-    image_tab, voice_tab = st.tabs(["image_packet", "voice_packet"])
+    image_tab, voice_tab, document_tab = st.tabs(["image_packet", "voice_packet", "document_packet"])
 
     with image_tab:
         image_file = st.file_uploader(
@@ -1026,6 +1109,24 @@ def render_message_composer(room: str, username: str) -> None:
                 data, mime_type, filename = validated
                 append_media_message(room, username, "audio", data, mime_type, filename)
                 reset_media_packet("voice_upload_packet")
+                st.rerun()
+
+    with document_tab:
+        document_file = st.file_uploader(
+            "upload_document:",
+            type=ALLOWED_DOCUMENT_TYPES,
+            accept_multiple_files=False,
+            key=f"document_payload_{document_nonce}",
+            help="Format aman: PDF, DOCX, XLSX, PPTX. Shell/script dan file yang menyamar akan diblokir.",
+        )
+        if document_file is not None:
+            st.caption(f"selected_document={document_file.name} | size={len(document_file.getvalue())} bytes")
+        if st.button("SEND DOCUMENT", key="send_document_packet"):
+            validated = validate_document_file(document_file)
+            if validated is not None:
+                data, mime_type, filename = validated
+                append_media_message(room, username, "document", data, mime_type, filename)
+                reset_media_packet("document_packet")
                 st.rerun()
 
 # ==============================
@@ -1102,4 +1203,4 @@ else:
 
 render_message_composer(room, username)
 
-st.caption("encrypted_local_storage=true | use panic_destroy/manual_destroy after session")
+st.caption("encrypted_local_storage=true | document_guard=true | use panic_destroy after session")
