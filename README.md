@@ -1,31 +1,54 @@
-# ChatSecrets Hacker Terminal
+# ChatSecrets Terminal
 
-Aplikasi chat multi-room berbasis Streamlit dengan tampilan terminal hacker, auto-refresh, enkripsi Fernet, dan suara pesan masuk.
+Aplikasi chat terminal-style berbasis Streamlit dengan enkripsi Fernet, auto-refresh, panic room, dan akses private link.
 
-## Fitur
-
-- Tampilan terminal hacker / CRT
-- Multi-room chat
-- Pesan terenkripsi dengan Fernet
-- Auto-refresh via `streamlit-autorefresh`
-- Suara pesan masuk ala hacker
-- Tombol `Test Hacker Sound` di sidebar
-- Render chat via `components.html()` agar HTML tidak bocor sebagai teks
-
-## Cara Menjalankan
+## Cara menjalankan
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Catatan Suara
+## Admin private link
 
-Browser modern sering memblokir audio otomatis. Klik tombol **Test Hacker Sound** di sidebar sekali setelah aplikasi terbuka. Setelah itu, pesan masuk dari user lain akan mencoba memutar suara otomatis.
+1. Buka sidebar, pilih halaman **Admin**.
+2. Masukkan password admin.
+   - Disarankan set environment variable:
+     ```bash
+     export CHATSECRETS_ADMIN_PASSWORD="password-kuat-anda"
+     ```
+   - Jika env belum diset, aplikasi akan membuat file `admin_password.txt` otomatis di folder project. Buka file tersebut untuk melihat password awal.
+3. Isi nama room.
+4. Klik **Create Private Link**.
+5. Bagikan link yang muncul ke user yang diizinkan masuk.
 
-Jika masih belum terdengar:
+## Aturan akses room
 
-1. Pastikan volume laptop/browser tidak mute.
-2. Klik ikon izin audio/site settings di browser dan izinkan sound.
-3. Jalankan dari browser desktop, bukan preview terbatas.
-4. Pastikan pesan yang masuk berasal dari username lain, karena pesan sendiri tidak memicu suara.
+- Room tidak bisa lagi dimasuki manual hanya dengan mengetik nama room.
+- User hanya bisa masuk jika URL membawa token private link valid dalam format:
+  ```text
+  ?room=nama-room&access=token-rahasia
+  ```
+- Private link bisa di-revoke, diaktifkan kembali, atau dihapus dari halaman Admin.
+
+## Panic Room
+
+Saat tombol **PANIC ROOM // DESTROY NOW** ditekan:
+
+- Semua pesan/data room dihapus dari `chat_rooms.json`.
+- Status online room dihapus dari `online_status.json`.
+- Room ditandai hancur di `destroyed_rooms.json` supaya tidak bisa dibuat ulang otomatis.
+- Semua private link untuk room tersebut otomatis di-revoke di `private_links.json`.
+- Browser user yang menekan panic langsung refresh dan query private link dibersihkan dari URL.
+- User lain akan otomatis keluar dari room pada refresh berikutnya.
+
+## File storage lokal
+
+Aplikasi menyimpan data lokal pada file JSON:
+
+- `chat_rooms.json`
+- `online_status.json`
+- `destroyed_rooms.json`
+- `private_links.json`
+
+Untuk produksi, gunakan storage yang lebih aman dan batasi akses file server.
