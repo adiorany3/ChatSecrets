@@ -545,7 +545,48 @@ def update_online_status(room: str, username: str) -> list[str]:
     return [user for user in active_users.keys() if user != username]
 
 
-def validate_media_file(uploaded_file: Any, expected_prefix: str) -> tuple[bytes, str, str] | None:
+def detect_image_format(data: bytes) -> str | None:
+    """Return the real image format from magic bytes, or None if it is not a supported image."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def is_probably_text_payload(data: bytes) -> bool:
+    sample = data[:4096]
+    if not sample:
+        return False
+    printable = sum(1 for byte in sample if byte in b"\t\n\r" or 32 <= byte <= 126)
+    return printable / max(len(sample), 1) > 0.85
+
+
+def looks_like_shell_payload(data: bytes) -> bool:
+    """Detect common shell-script patterns in a file pretending to be an image."""
+    sample = data[:4096].lstrip().lower()
+    if any(sample.startswith(signature.lower()) for signature in SHELL_SIGNATURES):
+        return True
+    if not is_probably_text_payload(data):
+        return False
+    keyword_hits = sum(1 for keyword in SHELL_KEYWORDS if keyword.lower() in sample)
+    shell_syntax_hits = sum(token in sample for token in [b"#!/", b"function ", b"; then", b"fi\n", b"for ", b"do\n", b"done\n"])
+    return keyword_hits >= 2 or (keyword_hits >= 1 and shell_syntax_hits >= 1)
+
+
+def security_destroy_for_disguised_image(room: str) -> None:
+    deleted_count = destroy_room_messages(room)
+    reset_media_packet("image_packet")
+    st.error(
+        "SECURITY ALERT: Image Packet terdeteksi sebagai file shell/script yang menyamar. "
+        f"Payload diblokir dan {deleted_count} pesan di room ini langsung dihancurkan."
+    )
+    st.rerun()
+
+
+def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | None = None) -> tuple[bytes, str, str] | None:
     if uploaded_file is None:
         st.error("File belum dipilih.")
         return None
@@ -562,9 +603,24 @@ def validate_media_file(uploaded_file: Any, expected_prefix: str) -> tuple[bytes
     mime_type = getattr(uploaded_file, "type", "") or "application/octet-stream"
     filename = getattr(uploaded_file, "name", "media_payload") or "media_payload"
 
-    if expected_prefix == "image" and not mime_type.startswith("image/"):
-        st.error("File yang dikirim bukan gambar valid.")
-        return None
+    if expected_prefix == "image":
+        real_image_format = detect_image_format(data)
+
+        if real_image_format is None:
+            if looks_like_shell_payload(data) and room:
+                security_destroy_for_disguised_image(room)
+            st.error("File yang dikirim bukan gambar valid. Payload diblokir dan tidak disimpan.")
+            return None
+
+        normalized_filename = filename.lower()
+        allowed_extension = any(normalized_filename.endswith(f".{ext}") for ext in ALLOWED_IMAGE_TYPES)
+        if not mime_type.startswith("image/") or not allowed_extension:
+            st.error("Metadata file tidak cocok dengan Image Packet. Payload diblokir dan tidak disimpan.")
+            return None
+
+        # Pastikan MIME yang disimpan mengikuti hasil magic-byte, bukan hanya klaim browser.
+        mime_type = "image/jpeg" if real_image_format == "jpg" else f"image/{real_image_format}"
+
     if expected_prefix == "audio" and not mime_type.startswith("audio/"):
         # Sebagian browser merekam audio sebagai video/webm, tetap izinkan untuk voice note.
         if mime_type not in {"video/webm", "application/octet-stream"}:
@@ -654,6 +710,7 @@ def render_header() -> None:
           <p class="status-line">[CRYPTO] Fernet encryption active...</p>
           <p class="status-line">[MODE] Private multi-room communication...</p>
           <p class="status-line">[MEDIA] Image packet + voice packet enabled...</p>
+          <p class="status-line">[SECURITY] Image Packet magic-byte validation + disguised shell auto-destroy active...</p>
           <p class="status-line">[PURGE] Auto-destroy tersedia: Never / 10 / 20 / 30 / 40 / 50 / 60 menit...</p>
           <p class="status-line">[PANIC] Panic destroy pesan room aktif siap digunakan...</p>
         </div>
@@ -784,12 +841,12 @@ def render_message_composer(room: str, username: str) -> None:
             type=ALLOWED_IMAGE_TYPES,
             accept_multiple_files=False,
             key=f"image_payload_{image_nonce}",
-            help="Format: PNG, JPG/JPEG, WEBP.",
+            help="Format: PNG, JPG/JPEG, WEBP. File divalidasi dari magic bytes; shell/script yang menyamar akan memicu destroy pesan.",
         )
         if image_file is not None:
             st.image(image_file, caption="Preview image packet", width=220)
         if st.button("Send Image", key="send_image_packet"):
-            validated = validate_media_file(image_file, "image")
+            validated = validate_media_file(image_file, "image", room=room)
             if validated is not None:
                 data, mime_type, filename = validated
                 append_media_message(room, username, "image", data, mime_type, filename)
