@@ -752,6 +752,87 @@ def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
     </html>
     """
 
+
+# ==============================
+# SOUND NOTIFICATION HELPERS
+# ==============================
+def latest_foreign_message_signature(messages: list[dict[str, Any]], username: str) -> str:
+    """Return a stable signature for the latest message sent by another user."""
+    for msg in reversed(messages):
+        if str(msg.get("username", "")) != username:
+            return str(msg.get("id") or f"{msg.get('created_at', '')}:{msg.get('time', '')}:{msg.get('username', '')}")
+    return ""
+
+
+def render_hacker_sound_alert() -> None:
+    """Play a short terminal-style synth alert for a newly received message."""
+    components.html(
+        """
+        <script>
+        (async function () {
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+
+            const ctx = new AudioContext();
+            if (ctx.state === "suspended") await ctx.resume();
+
+            const master = ctx.createGain();
+            master.gain.setValueAtTime(0.0001, ctx.currentTime);
+            master.gain.exponentialRampToValueAtTime(0.075, ctx.currentTime + 0.018);
+            master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.82);
+            master.connect(ctx.destination);
+
+            const sequence = [
+              { f: 880,  t: 0.00, d: 0.09, type: "square" },
+              { f: 1320, t: 0.10, d: 0.07, type: "square" },
+              { f: 1760, t: 0.18, d: 0.08, type: "sawtooth" },
+              { f: 660,  t: 0.31, d: 0.10, type: "square" },
+              { f: 990,  t: 0.43, d: 0.12, type: "triangle" }
+            ];
+
+            sequence.forEach((note) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              const start = ctx.currentTime + note.t;
+              const end = start + note.d;
+
+              osc.type = note.type;
+              osc.frequency.setValueAtTime(note.f, start);
+              osc.frequency.exponentialRampToValueAtTime(Math.max(40, note.f * 0.62), end);
+
+              gain.gain.setValueAtTime(0.0001, start);
+              gain.gain.exponentialRampToValueAtTime(0.55, start + 0.012);
+              gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+              osc.connect(gain);
+              gain.connect(master);
+              osc.start(start);
+              osc.stop(end + 0.02);
+            });
+
+            const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < output.length; i++) output[i] = (Math.random() * 2 - 1) * 0.18;
+            const noise = ctx.createBufferSource();
+            const noiseGain = ctx.createGain();
+            noise.buffer = noiseBuffer;
+            noiseGain.gain.setValueAtTime(0.0001, ctx.currentTime + 0.55);
+            noiseGain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.57);
+            noiseGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.68);
+            noise.connect(noiseGain);
+            noiseGain.connect(master);
+            noise.start(ctx.currentTime + 0.55);
+            noise.stop(ctx.currentTime + 0.70);
+          } catch (error) {
+            // Browser may block audio until the user interacts with the page.
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
 # ==============================
 # UI HELPERS
 # ==============================
@@ -760,20 +841,21 @@ def render_header() -> None:
         """
         <h1>./chatsecrets --stealth <span class="cursor-blink"></span></h1>
         <div class="terminal-bar">
-          <p class="terminal-line">encrypted_room=on | media_packet=on | panic_destroy=armed | shell_image_guard=on</p>
+          <p class="terminal-line">encrypted_room=on | media_packet=on | hacker_sound=armed | panic_destroy=armed | shell_image_guard=on</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def render_sidebar() -> tuple[bool, int]:
+def render_sidebar() -> tuple[bool, int, bool]:
     with st.sidebar:
         st.markdown("### ./system")
         auto_refresh_enabled = st.toggle("auto_refresh", value=True)
         refresh_seconds = st.slider("refresh_sec", min_value=2, max_value=15, value=5, step=1)
+        sound_enabled = st.toggle("hacker_sound", value=True, help="Putar efek suara terminal saat ada pesan baru masuk dari user lain.")
         st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB")
-    return auto_refresh_enabled, refresh_seconds
+    return auto_refresh_enabled, refresh_seconds, sound_enabled
 
 
 def render_auto_destroy_control(room: str) -> str:
@@ -945,7 +1027,7 @@ render_header()
 if destroyed_rooms:
     st.warning("Auto-destroy menjalankan purge untuk room: " + ", ".join(destroyed_rooms))
 
-auto_refresh_enabled, refresh_seconds = render_sidebar()
+auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
 if auto_refresh_enabled:
     if st_autorefresh is not None:
         st_autorefresh(interval=refresh_seconds * 1000, key="chat_auto_refresh")
@@ -978,6 +1060,16 @@ render_panic_destroy(room)
 render_destroy_room(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
+
+latest_foreign_signature = latest_foreign_message_signature(messages, username)
+last_seen_signature_key = f"last_seen_foreign_message::{room}::{username}"
+previous_foreign_signature = st.session_state.get(last_seen_signature_key, "")
+
+if latest_foreign_signature and previous_foreign_signature and latest_foreign_signature != previous_foreign_signature and sound_enabled:
+    render_hacker_sound_alert()
+
+st.session_state[last_seen_signature_key] = latest_foreign_signature
+
 components.html(render_chat_box(messages, username), height=495, scrolling=False)
 
 if online_users:
