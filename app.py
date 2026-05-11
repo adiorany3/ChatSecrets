@@ -161,7 +161,7 @@ h1 {
   padding-bottom: .45rem;
 }
 
-h1::before { content: "root@chatsecrets:~$ "; color: var(--green-soft); }
+h1::before { content: "root@AntiTrust:~$ "; color: var(--green-soft); }
 
 .terminal-bar {
   border: 1px solid var(--line);
