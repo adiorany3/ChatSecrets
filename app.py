@@ -696,8 +696,20 @@ def render_destroy_room(room: str) -> None:
                 st.error("Kode destroy salah.")
 
 
+def reset_media_packet(packet_name: str) -> None:
+    """Reset file/audio widgets by rotating their Streamlit keys."""
+    nonce_key = f"{packet_name}_nonce"
+    st.session_state[nonce_key] = int(st.session_state.get(nonce_key, 0)) + 1
+
+
 def render_message_composer(room: str, username: str) -> None:
     st.markdown("### SEND PACKET")
+
+    # Streamlit file/audio widgets cannot reliably be cleared by assigning None.
+    # Rotating the widget key after a successful send forces a fresh empty packet slot.
+    image_nonce = int(st.session_state.get("image_packet_nonce", 0))
+    voice_record_nonce = int(st.session_state.get("voice_record_packet_nonce", 0))
+    voice_upload_nonce = int(st.session_state.get("voice_upload_packet_nonce", 0))
 
     with st.form("send_message_form", clear_on_submit=True):
         message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
@@ -720,7 +732,7 @@ def render_message_composer(room: str, username: str) -> None:
             "upload_image:",
             type=ALLOWED_IMAGE_TYPES,
             accept_multiple_files=False,
-            key="image_payload",
+            key=f"image_payload_{image_nonce}",
             help="Format: PNG, JPG/JPEG, WEBP.",
         )
         if image_file is not None:
@@ -730,13 +742,14 @@ def render_message_composer(room: str, username: str) -> None:
             if validated is not None:
                 data, mime_type, filename = validated
                 append_media_message(room, username, "image", data, mime_type, filename)
+                reset_media_packet("image_packet")
                 st.rerun()
 
     with voice_tab:
         recorder_supported = hasattr(st, "audio_input")
         recorded_audio = None
         if recorder_supported:
-            recorded_audio = st.audio_input("record_voice:", key="voice_payload_record")
+            recorded_audio = st.audio_input("record_voice:", key=f"voice_payload_record_{voice_record_nonce}")
             if recorded_audio is not None:
                 st.audio(recorded_audio)
         else:
@@ -747,13 +760,14 @@ def render_message_composer(room: str, username: str) -> None:
             if validated is not None:
                 data, mime_type, filename = validated
                 append_media_message(room, username, "audio", data, mime_type, filename or "voice-note.wav")
+                reset_media_packet("voice_record_packet")
                 st.rerun()
 
         audio_file = st.file_uploader(
             "atau upload_audio:",
             type=ALLOWED_AUDIO_TYPES,
             accept_multiple_files=False,
-            key="voice_payload_upload",
+            key=f"voice_payload_upload_{voice_upload_nonce}",
             help="Format: WAV, MP3, OGG, M4A, AAC, FLAC, WEBM.",
         )
         if audio_file is not None:
@@ -763,6 +777,7 @@ def render_message_composer(room: str, username: str) -> None:
             if validated is not None:
                 data, mime_type, filename = validated
                 append_media_message(room, username, "audio", data, mime_type, filename)
+                reset_media_packet("voice_upload_packet")
                 st.rerun()
 
 # ==============================
