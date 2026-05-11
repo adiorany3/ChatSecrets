@@ -1,20 +1,30 @@
 import base64
+import hashlib
 import html
 import io
 import json
 import math
 import os
+import shutil
 import struct
 import time
 import uuid
 import wave
 import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
 from cryptography.fernet import Fernet
+
+try:
+    from PIL import Image, UnidentifiedImageError
+    Image.MAX_IMAGE_PIXELS = 24_000_000
+except Exception:
+    Image = None
+    UnidentifiedImageError = Exception
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -30,13 +40,16 @@ FERNET_KEY_FILE = "fernet.key"
 CHAT_FILE = "chat_rooms.json"
 ONLINE_FILE = "online_status.json"
 ROOM_SETTINGS_FILE = "room_settings.json"
+PACKET_DIR = "secure_packets"
 WIB = timezone(timedelta(hours=7))
 
 ONLINE_ACTIVE_SECONDS = 20
 DEFAULT_AUTO_DESTROY_MINUTES = 30
 AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "40 menit", "50 menit", "60 menit"]
 
-MAX_MEDIA_BYTES = 8 * 1024 * 1024  # 8 MB per media message
+MAX_MEDIA_BYTES = 25 * 1024 * 1024  # 25 MB per packet; stored outside chat JSON to prevent browser lag
+MAX_INLINE_PREVIEW_BYTES = 1_500_000  # avoid rendering huge upload previews in browser
+THUMBNAIL_MAX_SIZE = (220, 220)
 ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 ALLOWED_AUDIO_TYPES = ["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]
 ALLOWED_DOCUMENT_TYPES = ["pdf", "docx", "xlsx", "pptx"]
@@ -317,6 +330,12 @@ html, body {
   margin: 0 0 7px 0;
   letter-spacing: .6px;
 }
+.media-note, .media-placeholder {
+  display: block;
+  color: rgba(140,255,174,.72);
+  font-size: 11px;
+  margin-top: 6px;
+}
 .chat-image {
   display: block;
   max-width: min(260px, 100%);
@@ -388,6 +407,76 @@ def decrypt_message(text: str) -> str:
         return "[Pesan tidak dapat didekripsi]"
 
 
+def encrypt_bytes(data: bytes) -> bytes:
+    return get_fernet().encrypt(data)
+
+
+def decrypt_bytes(token: bytes) -> bytes:
+    return get_fernet().decrypt(token)
+
+
+def safe_room_slug(room: str) -> str:
+    return hashlib.sha256(room.encode("utf-8", errors="ignore")).hexdigest()[:32]
+
+
+def packet_room_dir(room: str) -> Path:
+    return Path(PACKET_DIR) / safe_room_slug(room)
+
+
+def save_encrypted_packet(room: str, message_id: str, data: bytes) -> str:
+    directory = packet_room_dir(room)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{message_id}.bin"
+    path.write_bytes(encrypt_bytes(data))
+    return str(path.as_posix())
+
+
+def resolve_packet_path(packet_path: str) -> Path | None:
+    if not packet_path:
+        return None
+    root = Path(PACKET_DIR).resolve()
+    candidate = Path(packet_path)
+    if candidate.is_absolute():
+        return None
+    target = candidate.resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    return target
+
+
+def read_encrypted_packet(packet_path: str) -> bytes | None:
+    path = resolve_packet_path(packet_path)
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    try:
+        return decrypt_bytes(path.read_bytes())
+    except Exception:
+        return None
+
+
+def delete_room_packet_files(room: str) -> None:
+    directory = packet_room_dir(room)
+    if directory.exists():
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def format_bytes(size: int | str | None) -> str:
+    try:
+        value = int(size or 0)
+    except (TypeError, ValueError):
+        value = 0
+    units = ["B", "KB", "MB", "GB"]
+    amount = float(value)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024
+
+
 def wib_now() -> str:
     return datetime.now(WIB).strftime("%H:%M")
 
@@ -450,10 +539,11 @@ def mark_room_active(room: str) -> None:
 
 
 def panic_clear_messages(room: str) -> int:
-    """Immediately remove every text/image/voice message from the active room."""
+    """Immediately remove every text/image/voice/document packet from the active room."""
     rooms = load_json(CHAT_FILE)
     message_count = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
     rooms[room] = []
+    delete_room_packet_files(room)
     save_json(CHAT_FILE, rooms)
     mark_room_active(room)
     return message_count
@@ -517,6 +607,7 @@ def purge_inactive_rooms() -> list[str]:
         config["last_active_at"] = last_active_at
 
         if now - last_active_at >= int(minutes) * 60:
+            delete_room_packet_files(room)
             rooms.pop(room, None)
             online.pop(room, None)
             settings.pop(room, None)
@@ -546,25 +637,53 @@ def make_text_message(username: str, text: str) -> dict[str, str]:
     }
 
 
+def make_image_thumbnail(data: bytes) -> tuple[str, str]:
+    """Return encrypted base64 thumbnail + MIME. Keeps chat HTML light even for large images."""
+    if Image is None:
+        return "", ""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.thumbnail(THUMBNAIL_MAX_SIZE)
+            if image.mode not in {"RGB", "L"}:
+                image = image.convert("RGB")
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=68, optimize=True)
+            thumb_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return encrypt_message(thumb_b64), "image/jpeg"
+    except Exception:
+        return "", ""
+
+
 def make_media_message(
+    room: str,
     username: str,
     media_type: str,
     data: bytes,
     mime_type: str,
     filename: str,
 ) -> dict[str, str]:
-    encoded_payload = base64.b64encode(data).decode("ascii")
-    return {
-        "id": str(uuid.uuid4()),
+    message_id = str(uuid.uuid4())
+    packet_path = save_encrypted_packet(room, message_id, data)
+    message: dict[str, str] = {
+        "id": message_id,
         "type": media_type,
         "username": username,
-        "payload": encrypt_message(encoded_payload),
+        "storage": "external",
+        "packet_path": packet_path,
         "mime_type": mime_type,
         "filename": filename,
         "size_bytes": str(len(data)),
         "time": wib_now(),
         "created_at": str(epoch_now()),
     }
+
+    if media_type == "image":
+        thumbnail_payload, thumbnail_mime = make_image_thumbnail(data)
+        if thumbnail_payload:
+            message["thumbnail_payload"] = thumbnail_payload
+            message["thumbnail_mime"] = thumbnail_mime
+
+    return message
 
 
 def append_text_message(room: str, username: str, message_text: str) -> None:
@@ -584,9 +703,8 @@ def append_media_message(
 ) -> None:
     rooms = load_json(CHAT_FILE)
     rooms.setdefault(room, [])
-    rooms[room].append(make_media_message(username, media_type, data, mime_type, filename))
+    rooms[room].append(make_media_message(room, username, media_type, data, mime_type, filename))
     save_json(CHAT_FILE, rooms)
-
 
 def update_online_status(room: str, username: str) -> list[str]:
     online = load_json(ONLINE_FILE)
@@ -690,7 +808,7 @@ def validate_document_file(uploaded_file: Any) -> tuple[bytes, str, str] | None:
         return None
 
     if len(data) > MAX_MEDIA_BYTES:
-        st.error(f"Ukuran dokumen terlalu besar. Maksimal {MAX_MEDIA_BYTES // (1024 * 1024)} MB per dokumen.")
+        st.error(f"Ukuran dokumen terlalu besar. Maksimal {format_bytes(MAX_MEDIA_BYTES)} per dokumen.")
         return None
 
     filename = getattr(uploaded_file, "name", "document_packet") or "document_packet"
@@ -727,7 +845,7 @@ def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | No
         return None
 
     if len(data) > MAX_MEDIA_BYTES:
-        st.error(f"Ukuran file terlalu besar. Maksimal {MAX_MEDIA_BYTES // (1024 * 1024)} MB per media.")
+        st.error(f"Ukuran file terlalu besar. Maksimal {format_bytes(MAX_MEDIA_BYTES)} per media.")
         return None
 
     mime_type = getattr(uploaded_file, "type", "") or "application/octet-stream"
@@ -742,6 +860,14 @@ def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | No
         if real_image_format is None:
             st.error("File yang dikirim bukan gambar valid. Payload diblokir dan tidak disimpan.")
             return None
+
+        if Image is not None:
+            try:
+                with Image.open(io.BytesIO(data)) as image_check:
+                    image_check.verify()
+            except Exception:
+                st.error("Image Packet rusak/tidak valid. Payload diblokir dan tidak disimpan.")
+                return None
 
         normalized_filename = filename.lower()
         allowed_extension = any(normalized_filename.endswith(f".{ext}") for ext in ALLOWED_IMAGE_TYPES)
@@ -761,38 +887,57 @@ def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | No
     return data, mime_type, filename
 
 
+def decode_legacy_inline_payload(msg: dict[str, Any]) -> bytes | None:
+    payload_encrypted = str(msg.get("payload", ""))
+    if not payload_encrypted:
+        return None
+    payload = decrypt_message(payload_encrypted)
+    if payload.startswith("[Pesan tidak dapat didekripsi]"):
+        return None
+    try:
+        return base64.b64decode(payload.encode("ascii"), validate=True)
+    except Exception:
+        return None
+
+
+def load_packet_bytes_from_message(msg: dict[str, Any]) -> bytes | None:
+    if msg.get("storage") == "external":
+        return read_encrypted_packet(str(msg.get("packet_path", "")))
+    return decode_legacy_inline_payload(msg)
+
+
 def render_media_payload(msg: dict[str, Any]) -> str:
     msg_type = str(msg.get("type", "text"))
-    payload_encrypted = str(msg.get("payload", ""))
-    payload = decrypt_message(payload_encrypted)
-
-    if payload.startswith("[Pesan tidak dapat didekripsi]"):
-        return '<span class="media-label">[ERROR] Media tidak dapat didekripsi.</span>'
-
-    mime_type = html.escape(str(msg.get("mime_type", "application/octet-stream")), quote=True)
     filename = html.escape(str(msg.get("filename", "media_payload")), quote=True)
-    safe_payload = html.escape(payload, quote=True)
+    size_label = html.escape(format_bytes(msg.get("size_bytes", 0)))
 
     if msg_type == "image":
-        return f"""
+        thumbnail = decrypt_message(str(msg.get("thumbnail_payload", ""))) if msg.get("thumbnail_payload") else ""
+        thumbnail_mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")), quote=True)
+        if thumbnail and not thumbnail.startswith("[Pesan tidak dapat didekripsi]"):
+            safe_thumb = html.escape(thumbnail, quote=True)
+            preview = f'<img class="chat-image" src="data:{thumbnail_mime};base64,{safe_thumb}" alt="{filename}" />'
+        else:
+            preview = '<span class="media-placeholder">thumbnail=not_available</span>'
+        return f'''
         <span class="media-label">[IMAGE_PACKET] {filename}</span>
-        <img class="chat-image" src="data:{mime_type};base64,{safe_payload}" alt="{filename}" />
-        """
+        {preview}
+        <span class="media-note">size={size_label} | original=packet_viewer</span>
+        '''
 
     if msg_type == "audio":
-        return f"""
+        return f'''
         <span class="media-label">[VOICE_PACKET] {filename}</span>
-        <audio class="chat-audio" controls preload="metadata" src="data:{mime_type};base64,{safe_payload}"></audio>
-        """
+        <span class="media-note">size={size_label} | playback=packet_viewer</span>
+        '''
 
     if msg_type == "document":
-        return f"""
+        return f'''
         <span class="media-label">[DOCUMENT_PACKET] {filename}</span>
-        <a class="chat-doc" href="data:{mime_type};base64,{safe_payload}" download="{filename}">DOWNLOAD_DOCUMENT :: {filename}</a>
-        """
+        <span class="media-note">size={size_label} | download=packet_viewer</span>
+        '''
 
     return '<span class="media-label">[UNKNOWN_PACKET] Format pesan tidak dikenal.</span>'
-
 
 def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
@@ -808,7 +953,7 @@ def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
             safe_time = html.escape(str(msg.get("time", "")))
 
             # Backward compatible untuk pesan lama yang belum punya field type.
-            if msg_type == "text" or "payload" not in msg:
+            if msg_type == "text" or (msg_type not in {"image", "audio", "document"} and "payload" not in msg):
                 safe_text = html.escape(decrypt_message(str(msg.get("text", ""))))
                 content = safe_text
             else:
@@ -834,6 +979,80 @@ def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
     </body>
     </html>
     """
+
+
+# ==============================
+# PACKET VIEWER / LAZY DOWNLOAD
+# ==============================
+def list_packet_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    packets = []
+    for msg in messages:
+        if str(msg.get("type", "")) in {"image", "audio", "document"}:
+            packets.append(msg)
+    return packets
+
+
+def packet_label(msg: dict[str, Any]) -> str:
+    msg_type = str(msg.get("type", "packet")).upper()
+    filename = str(msg.get("filename", "packet"))
+    user = str(msg.get("username", "unknown"))
+    timestamp = str(msg.get("time", ""))
+    size_label = format_bytes(msg.get("size_bytes", 0))
+    return f"[{msg_type}] {filename} | {size_label} | {user} | {timestamp}"
+
+
+def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
+    packets = list_packet_messages(messages)
+    if not packets:
+        return
+
+    st.markdown("### ./packet_viewer")
+    st.caption("Mode hemat performa: chat hanya memuat metadata + thumbnail kecil. File asli didekripsi saat packet dipilih.")
+
+    indexed_packets = {str(msg.get("id", idx)): msg for idx, msg in enumerate(packets)}
+    packet_ids = ["-- pilih packet --"] + list(reversed(list(indexed_packets.keys())))
+    selected_id = st.selectbox(
+        "open_packet:",
+        options=packet_ids,
+        format_func=lambda item: item if item == "-- pilih packet --" else packet_label(indexed_packets[item]),
+        key=f"packet_viewer_select::{room}",
+    )
+
+    if selected_id == "-- pilih packet --":
+        return
+
+    selected_msg = indexed_packets[selected_id]
+    if st.button("DECRYPT / OPEN SELECTED PACKET", key=f"open_packet_button::{room}"):
+        st.session_state[f"opened_packet::{room}"] = selected_id
+
+    opened_id = st.session_state.get(f"opened_packet::{room}")
+    if opened_id != selected_id:
+        st.info("packet_selected=true | klik DECRYPT / OPEN untuk memuat file asli")
+        return
+
+    data = load_packet_bytes_from_message(selected_msg)
+    if data is None:
+        st.error("packet_error=missing_or_decrypt_failed")
+        return
+
+    msg_type = str(selected_msg.get("type", ""))
+    mime_type = str(selected_msg.get("mime_type", "application/octet-stream"))
+    filename = str(selected_msg.get("filename", "packet.bin"))
+
+    if msg_type == "image":
+        st.image(data, caption=f"IMAGE_PACKET :: {filename}", width=360)
+    elif msg_type == "audio":
+        st.audio(data, format=mime_type)
+    elif msg_type == "document":
+        st.info(f"DOCUMENT_PACKET siap di-download: {filename}")
+
+    st.download_button(
+        label=f"DOWNLOAD {msg_type.upper()} PACKET",
+        data=data,
+        file_name=filename,
+        mime=mime_type,
+        key=f"download_packet::{room}::{selected_id}",
+    )
 
 
 # ==============================
@@ -964,7 +1183,7 @@ def render_header() -> None:
         """
         <h1>./chatsecrets --stealth <span class="cursor-blink"></span></h1>
         <div class="terminal-bar">
-          <p class="terminal-line">encrypted_room=on | media_packet=on | document_packet=on | hacker_sound=ding | panic_destroy=armed | shell_guard=on</p>
+          <p class="terminal-line">encrypted_room=on | media_packet=external | document_packet=external | hacker_sound=ding | panic_destroy=armed | shell_guard=on</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -980,7 +1199,7 @@ def render_sidebar() -> tuple[bool, int, bool]:
         if sound_enabled:
             render_hacker_sound_test_button()
             st.caption("Klik TEST SOUND untuk memastikan tab/browser mengizinkan audio.")
-        st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB | doc=pdf/docx/xlsx/pptx")
+        st.caption(f"packet_limit={format_bytes(MAX_MEDIA_BYTES)} | external_packet_store=on | doc=pdf/docx/xlsx/pptx")
     return auto_refresh_enabled, refresh_seconds, sound_enabled
 
 
@@ -1067,7 +1286,12 @@ def render_message_composer(room: str, username: str) -> None:
             help="Format: PNG, JPG/JPEG, WEBP. File divalidasi dari magic bytes; shell/script yang menyamar akan memicu destroy pesan.",
         )
         if image_file is not None:
-            st.image(image_file, caption="preview", width=220)
+            image_size = int(getattr(image_file, "size", 0) or 0)
+            st.caption(f"selected_image={image_file.name} | size={format_bytes(image_size)}")
+            if image_size <= MAX_INLINE_PREVIEW_BYTES:
+                st.image(image_file, caption="preview", width=220)
+            else:
+                st.info("large_image_preview=disabled | thumbnail dibuat setelah SEND IMAGE")
         if st.button("SEND IMAGE", key="send_image_packet"):
             validated = validate_media_file(image_file, "image", room=room)
             if validated is not None:
@@ -1102,7 +1326,12 @@ def render_message_composer(room: str, username: str) -> None:
             help="Format: WAV, MP3, OGG, M4A, AAC, FLAC, WEBM.",
         )
         if audio_file is not None:
-            st.audio(audio_file)
+            audio_size = int(getattr(audio_file, "size", 0) or 0)
+            st.caption(f"selected_audio={audio_file.name} | size={format_bytes(audio_size)}")
+            if audio_size <= MAX_INLINE_PREVIEW_BYTES:
+                st.audio(audio_file)
+            else:
+                st.info("large_audio_preview=disabled | playback tersedia lewat packet_viewer setelah dikirim")
         if st.button("SEND UPLOADED VOICE", key="send_uploaded_voice_packet"):
             validated = validate_media_file(audio_file, "audio")
             if validated is not None:
@@ -1120,7 +1349,8 @@ def render_message_composer(room: str, username: str) -> None:
             help="Format aman: PDF, DOCX, XLSX, PPTX. Shell/script dan file yang menyamar akan diblokir.",
         )
         if document_file is not None:
-            st.caption(f"selected_document={document_file.name} | size={len(document_file.getvalue())} bytes")
+            document_size = int(getattr(document_file, "size", 0) or 0)
+            st.caption(f"selected_document={document_file.name} | size={format_bytes(document_size)}")
         if st.button("SEND DOCUMENT", key="send_document_packet"):
             validated = validate_document_file(document_file)
             if validated is not None:
@@ -1196,6 +1426,8 @@ st.session_state[last_seen_signature_key] = latest_foreign_signature
 
 components.html(render_chat_box(messages, username), height=495, scrolling=False)
 
+render_packet_viewer(room, messages)
+
 if online_users:
     st.success(f"online={', '.join(online_users)}")
 else:
@@ -1203,4 +1435,4 @@ else:
 
 render_message_composer(room, username)
 
-st.caption("encrypted_local_storage=true | document_guard=true | use panic_destroy after session")
+st.caption("encrypted_local_storage=true | external_packet_store=true | document_guard=true | use panic_destroy after session")
