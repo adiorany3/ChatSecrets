@@ -787,7 +787,7 @@ def render_message_composer(room: str, username: str) -> None:
             help="Format: PNG, JPG/JPEG, WEBP.",
         )
         if image_file is not None:
-            st.image(image_file, caption="Preview image packet", use_container_width=True)
+            st.image(image_file, caption="Preview image packet", width=220)
         if st.button("Send Image", key="send_image_packet"):
             validated = validate_media_file(image_file, "image")
             if validated is not None:
