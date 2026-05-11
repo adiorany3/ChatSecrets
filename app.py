@@ -1389,7 +1389,7 @@ with col_user:
 
 if not room or not username:
     st.info("input room + user untuk masuk terminal")
-    st.caption("python/streamlit/fernet")
+    st.caption("VPN/Onion/Incognito/python/streamlit/fernet")
     st.stop()
 
 st.markdown("---")
