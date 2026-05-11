@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import html
 import json
@@ -30,6 +31,10 @@ WIB = timezone(timedelta(hours=7))
 ONLINE_ACTIVE_SECONDS = 20
 DEFAULT_AUTO_DESTROY_MINUTES = 30
 AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "40 menit", "50 menit", "60 menit"]
+
+MAX_MEDIA_BYTES = 8 * 1024 * 1024  # 8 MB per media message
+ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
+ALLOWED_AUDIO_TYPES = ["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
 
@@ -114,6 +119,12 @@ h1::before {
   box-shadow: 0 0 12px rgba(0,255,102,.24);
 }
 
+.stFileUploader, .stAudioInput {
+  background: rgba(0, 20, 8, .36);
+  border: 1px dashed rgba(0,255,102,.5);
+  padding: 10px;
+}
+
 .stButton button, .stFormSubmitButton button {
   background: #001a08 !important;
   color: var(--terminal-green) !important;
@@ -190,7 +201,7 @@ html, body {
   font-family: 'Share Tech Mono', monospace;
 }
 .chat-box {
-  height: 430px;
+  height: 470px;
   overflow-y: auto;
   box-sizing: border-box;
   background: rgba(0,0,0,.94);
@@ -218,6 +229,27 @@ html, body {
   font-size: 12px;
   color: rgba(120,255,165,.75);
   margin-top: 6px;
+}
+.media-label {
+  display: block;
+  color: rgba(156,255,184,.9);
+  font-size: 12px;
+  margin: 0 0 8px 0;
+  letter-spacing: .6px;
+}
+.chat-image {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border: 1px solid rgba(0,255,102,.65);
+  box-shadow: 0 0 16px rgba(0,255,102,.18);
+  background: #000;
+}
+.chat-audio {
+  display: block;
+  width: min(100%, 520px);
+  filter: sepia(1) saturate(3) hue-rotate(70deg);
 }
 .empty-line { color: rgba(120,255,165,.75); margin-top: 14px; }
 ::-webkit-scrollbar { width: 8px; }
@@ -423,9 +455,10 @@ def purge_inactive_rooms() -> list[str]:
 # ==============================
 # CHAT HELPERS
 # ==============================
-def make_message(username: str, text: str) -> dict[str, str]:
+def make_text_message(username: str, text: str) -> dict[str, str]:
     return {
         "id": str(uuid.uuid4()),
+        "type": "text",
         "username": username,
         "text": encrypt_message(text),
         "time": wib_now(),
@@ -433,10 +466,45 @@ def make_message(username: str, text: str) -> dict[str, str]:
     }
 
 
-def append_message(room: str, username: str, message_text: str) -> None:
+def make_media_message(
+    username: str,
+    media_type: str,
+    data: bytes,
+    mime_type: str,
+    filename: str,
+) -> dict[str, str]:
+    encoded_payload = base64.b64encode(data).decode("ascii")
+    return {
+        "id": str(uuid.uuid4()),
+        "type": media_type,
+        "username": username,
+        "payload": encrypt_message(encoded_payload),
+        "mime_type": mime_type,
+        "filename": filename,
+        "size_bytes": str(len(data)),
+        "time": wib_now(),
+        "created_at": str(epoch_now()),
+    }
+
+
+def append_text_message(room: str, username: str, message_text: str) -> None:
     rooms = load_json(CHAT_FILE)
     rooms.setdefault(room, [])
-    rooms[room].append(make_message(username, message_text))
+    rooms[room].append(make_text_message(username, message_text))
+    save_json(CHAT_FILE, rooms)
+
+
+def append_media_message(
+    room: str,
+    username: str,
+    media_type: str,
+    data: bytes,
+    mime_type: str,
+    filename: str,
+) -> None:
+    rooms = load_json(CHAT_FILE)
+    rooms.setdefault(room, [])
+    rooms[room].append(make_media_message(username, media_type, data, mime_type, filename))
     save_json(CHAT_FILE, rooms)
 
 
@@ -452,6 +520,62 @@ def update_online_status(room: str, username: str) -> list[str]:
     return [user for user in active_users.keys() if user != username]
 
 
+def validate_media_file(uploaded_file: Any, expected_prefix: str) -> tuple[bytes, str, str] | None:
+    if uploaded_file is None:
+        st.error("File belum dipilih.")
+        return None
+
+    data = uploaded_file.getvalue()
+    if not data:
+        st.error("File kosong atau gagal dibaca.")
+        return None
+
+    if len(data) > MAX_MEDIA_BYTES:
+        st.error(f"Ukuran file terlalu besar. Maksimal {MAX_MEDIA_BYTES // (1024 * 1024)} MB per media.")
+        return None
+
+    mime_type = getattr(uploaded_file, "type", "") or "application/octet-stream"
+    filename = getattr(uploaded_file, "name", "media_payload") or "media_payload"
+
+    if expected_prefix == "image" and not mime_type.startswith("image/"):
+        st.error("File yang dikirim bukan gambar valid.")
+        return None
+    if expected_prefix == "audio" and not mime_type.startswith("audio/"):
+        # Sebagian browser merekam audio sebagai video/webm, tetap izinkan untuk voice note.
+        if mime_type not in {"video/webm", "application/octet-stream"}:
+            st.error("File yang dikirim bukan audio valid.")
+            return None
+
+    return data, mime_type, filename
+
+
+def render_media_payload(msg: dict[str, Any]) -> str:
+    msg_type = str(msg.get("type", "text"))
+    payload_encrypted = str(msg.get("payload", ""))
+    payload = decrypt_message(payload_encrypted)
+
+    if payload.startswith("[Pesan tidak dapat didekripsi]"):
+        return '<span class="media-label">[ERROR] Media tidak dapat didekripsi.</span>'
+
+    mime_type = html.escape(str(msg.get("mime_type", "application/octet-stream")), quote=True)
+    filename = html.escape(str(msg.get("filename", "media_payload")), quote=True)
+    safe_payload = html.escape(payload, quote=True)
+
+    if msg_type == "image":
+        return f"""
+        <span class="media-label">[IMAGE_PACKET] {filename}</span>
+        <img class="chat-image" src="data:{mime_type};base64,{safe_payload}" alt="{filename}" />
+        """
+
+    if msg_type == "audio":
+        return f"""
+        <span class="media-label">[VOICE_PACKET] {filename}</span>
+        <audio class="chat-audio" controls preload="metadata" src="data:{mime_type};base64,{safe_payload}"></audio>
+        """
+
+    return '<span class="media-label">[UNKNOWN_PACKET] Format pesan tidak dikenal.</span>'
+
+
 def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
         rows = '<div class="empty-line">[EMPTY] Belum ada pesan terenkripsi di room ini.</div>'
@@ -459,14 +583,22 @@ def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
         rows = ""
         for msg in messages:
             msg_user = str(msg.get("username", "unknown"))
+            msg_type = str(msg.get("type", "text"))
             is_me = msg_user == username
             css_class = "chat-bubble me" if is_me else "chat-bubble"
             safe_user = html.escape(msg_user)
-            safe_text = html.escape(decrypt_message(str(msg.get("text", ""))))
             safe_time = html.escape(str(msg.get("time", "")))
+
+            # Backward compatible untuk pesan lama yang belum punya field type.
+            if msg_type == "text" or "payload" not in msg:
+                safe_text = html.escape(decrypt_message(str(msg.get("text", ""))))
+                content = safe_text
+            else:
+                content = render_media_payload(msg)
+
             rows += f"""
             <div class="chat-line">
-              <div class="{css_class}">{safe_text}</div>
+              <div class="{css_class}">{content}</div>
               <div class="chat-meta">{safe_user}{' / you' if is_me else ''} :: {safe_time}</div>
             </div>
             """
@@ -496,6 +628,7 @@ def render_header() -> None:
           <p class="status-line">[BOOT] Secure channel initialized... terminal skin active...</p>
           <p class="status-line">[CRYPTO] Fernet encryption active...</p>
           <p class="status-line">[MODE] Private multi-room communication...</p>
+          <p class="status-line">[MEDIA] Image packet + voice packet enabled...</p>
           <p class="status-line">[PURGE] Auto-destroy tersedia: Never / 10 / 20 / 30 / 40 / 50 / 60 menit...</p>
         </div>
         """,
@@ -509,6 +642,8 @@ def render_sidebar() -> tuple[bool, int]:
         auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
         refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=5, step=1)
         st.caption("Auto-refresh menjaga status online tetap aktif dan membantu pengecekan auto-destroy.")
+        st.markdown("---")
+        st.caption(f"Batas media: {MAX_MEDIA_BYTES // (1024 * 1024)} MB per pesan.")
     return auto_refresh_enabled, refresh_seconds
 
 
@@ -560,6 +695,76 @@ def render_destroy_room(room: str) -> None:
             else:
                 st.error("Kode destroy salah.")
 
+
+def render_message_composer(room: str, username: str) -> None:
+    st.markdown("### SEND PACKET")
+
+    with st.form("send_message_form", clear_on_submit=True):
+        message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
+        col1, col2 = st.columns([3, 1])
+        send = col1.form_submit_button("Send Text")
+        ping = col2.form_submit_button("Ping")
+
+    if send and message.strip():
+        append_text_message(room, username, message.strip())
+        st.rerun()
+
+    if ping:
+        append_text_message(room, username, "PING!")
+        st.rerun()
+
+    image_tab, voice_tab = st.tabs(["Image Packet", "Voice Packet"])
+
+    with image_tab:
+        image_file = st.file_uploader(
+            "upload_image:",
+            type=ALLOWED_IMAGE_TYPES,
+            accept_multiple_files=False,
+            key="image_payload",
+            help="Format: PNG, JPG/JPEG, WEBP.",
+        )
+        if image_file is not None:
+            st.image(image_file, caption="Preview image packet", use_container_width=True)
+        if st.button("Send Image", key="send_image_packet"):
+            validated = validate_media_file(image_file, "image")
+            if validated is not None:
+                data, mime_type, filename = validated
+                append_media_message(room, username, "image", data, mime_type, filename)
+                st.rerun()
+
+    with voice_tab:
+        recorder_supported = hasattr(st, "audio_input")
+        recorded_audio = None
+        if recorder_supported:
+            recorded_audio = st.audio_input("record_voice:", key="voice_payload_record")
+            if recorded_audio is not None:
+                st.audio(recorded_audio)
+        else:
+            st.caption("Recorder langsung belum tersedia di versi Streamlit ini. Gunakan upload file audio.")
+
+        if recorder_supported and st.button("Send Recorded Voice", key="send_recorded_voice_packet"):
+            validated = validate_media_file(recorded_audio, "audio")
+            if validated is not None:
+                data, mime_type, filename = validated
+                append_media_message(room, username, "audio", data, mime_type, filename or "voice-note.wav")
+                st.rerun()
+
+        audio_file = st.file_uploader(
+            "atau upload_audio:",
+            type=ALLOWED_AUDIO_TYPES,
+            accept_multiple_files=False,
+            key="voice_payload_upload",
+            help="Format: WAV, MP3, OGG, M4A, AAC, FLAC, WEBM.",
+        )
+        if audio_file is not None:
+            st.audio(audio_file)
+        if st.button("Send Uploaded Voice", key="send_uploaded_voice_packet"):
+            validated = validate_media_file(audio_file, "audio")
+            if validated is not None:
+                data, mime_type, filename = validated
+                append_media_message(room, username, "audio", data, mime_type, filename)
+                st.rerun()
+
 # ==============================
 # APP FLOW
 # ==============================
@@ -608,27 +813,15 @@ else:
 render_destroy_room(room)
 
 messages = load_json(CHAT_FILE).get(room, [])
-components.html(render_chat_box(messages, username), height=455, scrolling=False)
-
-with st.form("send_message_form", clear_on_submit=True):
-    message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
-    col1, col2 = st.columns([3, 1])
-    send = col1.form_submit_button("Send")
-    ping = col2.form_submit_button("Ping")
+components.html(render_chat_box(messages, username), height=495, scrolling=False)
 
 if online_users:
     st.success(f"Online: {', '.join(online_users)}")
 else:
     st.info("Belum ada lawan bicara online di room ini.")
 
-if send and message.strip():
-    append_message(room, username, message.strip())
-    st.rerun()
-
-if ping:
-    append_message(room, username, "PING!")
-    st.rerun()
+render_message_composer(room, username)
 
 st.caption(
-    "Pesan terenkripsi di file lokal. Untuk keamanan, pilih auto-destroy atau gunakan Destroy Chat Room setelah selesai."
+    "Pesan teks, gambar, dan suara terenkripsi di file lokal. Untuk keamanan, pilih auto-destroy atau gunakan Destroy Chat Room setelah selesai."
 )
