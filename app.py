@@ -35,6 +35,31 @@ AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "40 menit",
 MAX_MEDIA_BYTES = 8 * 1024 * 1024  # 8 MB per media message
 ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 ALLOWED_AUDIO_TYPES = ["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]
+SHELL_SIGNATURES = [
+    b"#!/bin/sh",
+    b"#!/bin/bash",
+    b"#!/usr/bin/env sh",
+    b"#!/usr/bin/env bash",
+    b"<?php",
+    b"<script",
+]
+SHELL_KEYWORDS = [
+    b"/bin/bash",
+    b"/bin/sh",
+    b"bash -c",
+    b"sh -c",
+    b"curl ",
+    b"wget ",
+    b"chmod ",
+    b"rm -rf",
+    b"nc -e",
+    b"netcat",
+    b"powershell",
+    b"cmd.exe",
+    b"eval(",
+    b"system(",
+    b"exec(",
+]
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
 
@@ -46,19 +71,22 @@ APP_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
 
 :root {
-  --terminal-green: #00ff66;
-  --terminal-cyan: #00ddff;
-  --terminal-bg: #020403;
-  --terminal-panel: rgba(0, 20, 8, .92);
-  --terminal-dim: #79ff9e;
-  --terminal-danger: #ff275f;
+  --green: #00ff66;
+  --green-soft: #8cffae;
+  --green-muted: rgba(0,255,102,.58);
+  --bg: #000;
+  --panel: #020b04;
+  --panel2: #001604;
+  --line: rgba(0,255,102,.55);
+  --danger: #ff335c;
+  --cyan: #00ddff;
 }
 
+#MainMenu, footer, header { visibility: hidden; }
+
 .stApp {
-  background:
-    radial-gradient(circle at top, rgba(0,255,102,.16), transparent 38%),
-    linear-gradient(180deg, #020403 0%, #000 100%);
-  color: var(--terminal-green);
+  background: #000;
+  color: var(--green);
   font-family: 'Share Tech Mono', monospace;
 }
 
@@ -69,13 +97,13 @@ APP_CSS = """
   pointer-events: none;
   background: repeating-linear-gradient(
     to bottom,
-    rgba(255,255,255,.026) 0,
-    rgba(255,255,255,.026) 1px,
+    rgba(0,255,102,.035) 0,
+    rgba(0,255,102,.035) 1px,
     transparent 2px,
-    transparent 4px
+    transparent 5px
   );
+  opacity: .42;
   z-index: 9999;
-  mix-blend-mode: overlay;
 }
 
 .stApp::after {
@@ -83,127 +111,154 @@ APP_CSS = """
   position: fixed;
   inset: 0;
   pointer-events: none;
-  box-shadow: inset 0 0 130px rgba(0,255,102,.14);
+  box-shadow: inset 0 0 90px rgba(0,255,102,.13);
   z-index: 9998;
 }
 
 .block-container {
-  max-width: 980px;
-  padding-top: 2rem;
-  padding-bottom: 2rem;
+  max-width: 860px;
+  padding: 1.2rem 1rem 2rem 1rem;
 }
 
 h1, h2, h3, p, label, span, div, button, input, textarea {
   font-family: 'Share Tech Mono', monospace !important;
 }
 
+h1, h2, h3 {
+  color: var(--green) !important;
+  text-shadow: 0 0 8px rgba(0,255,102,.55);
+  letter-spacing: 1px;
+}
+
 h1 {
-  color: var(--terminal-green);
-  text-shadow: 0 0 8px var(--terminal-green), 0 0 20px rgba(0,255,102,.7);
-  letter-spacing: 2px;
-  border-bottom: 1px solid rgba(0,255,102,.75);
-  padding-bottom: 12px;
+  font-size: 1.55rem !important;
+  margin-bottom: .35rem !important;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: .45rem;
 }
 
-h1::before {
-  content: "root@AntiTrust:~$ ";
-  color: var(--terminal-dim);
-  font-size: .52em;
+h1::before { content: "root@chatsecrets:~$ "; color: var(--green-soft); }
+
+.terminal-bar {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 10px 12px;
+  margin: 8px 0 14px 0;
+  box-shadow: 0 0 18px rgba(0,255,102,.14);
 }
 
-.stTextInput input, .stSelectbox div[data-baseweb="select"] > div {
+.terminal-line {
+  margin: 0;
+  color: var(--green-soft);
+  font-size: .9rem;
+}
+
+.terminal-line::before { content: "> "; color: var(--green); }
+
+.compact-panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.stTextInput input,
+.stSelectbox div[data-baseweb="select"] > div,
+.stSlider,
+.stTextArea textarea {
   background: #000 !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid var(--terminal-green) !important;
+  color: var(--green) !important;
+  border: 1px solid var(--line) !important;
   border-radius: 0 !important;
-  box-shadow: 0 0 12px rgba(0,255,102,.24);
+  box-shadow: none !important;
 }
+
+.stTextInput input::placeholder { color: rgba(140,255,174,.5) !important; }
 
 .stFileUploader, .stAudioInput {
-  background: rgba(0, 20, 8, .36);
-  border: 1px dashed rgba(0,255,102,.5);
-  padding: 10px;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 0;
+  padding: 8px;
 }
 
+.stFileUploader label, .stAudioInput label { color: var(--green-soft) !important; }
+
 .stButton button, .stFormSubmitButton button {
-  background: #001a08 !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid var(--terminal-green) !important;
+  background: #000 !important;
+  color: var(--green) !important;
+  border: 1px solid var(--green) !important;
   border-radius: 0 !important;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 0 12px rgba(0,255,102,.25);
+  letter-spacing: .8px;
+  box-shadow: none !important;
 }
 
 .stButton button:hover, .stFormSubmitButton button:hover {
-  background: var(--terminal-green) !important;
+  background: var(--green) !important;
   color: #000 !important;
-  box-shadow: 0 0 24px rgba(0,255,102,.85);
 }
 
-.panic-panel {
-  border: 1px solid var(--terminal-danger);
-  background: rgba(255, 39, 95, .08);
-  box-shadow: 0 0 20px rgba(255, 39, 95, .22);
-  padding: 14px;
-  margin: 12px 0 18px 0;
+button[kind="primary"] {
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
 }
-.panic-title {
-  color: var(--terminal-danger);
-  text-shadow: 0 0 10px rgba(255, 39, 95, .75);
-  letter-spacing: 1px;
-  font-weight: 700;
+
+button[kind="primary"]:hover {
+  background: var(--danger) !important;
+  color: #000 !important;
 }
-.panic-copy { color: #ff9ab6; margin: 6px 0 0 0; }
+
+.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--line); }
+.stTabs [data-baseweb="tab"] {
+  background: #000;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 0;
+  color: var(--green-soft);
+}
+.stTabs [aria-selected="true"] { background: var(--panel2) !important; color: var(--green) !important; }
 
 .stAlert {
-  background: rgba(0,25,8,.88) !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid rgba(0,255,102,.55) !important;
+  background: var(--panel) !important;
+  color: var(--green-soft) !important;
+  border: 1px solid var(--line) !important;
   border-radius: 0 !important;
-  box-shadow: 0 0 14px rgba(0,255,102,.18);
 }
 
-.terminal-panel {
-  background: var(--terminal-panel);
-  border: 1px solid var(--terminal-green);
-  box-shadow: 0 0 24px rgba(0,255,102,.24);
-  padding: 18px;
-  margin: 18px 0 24px 0;
-  position: relative;
+[data-testid="stSidebar"] {
+  background: #000;
+  border-right: 1px solid var(--line);
 }
 
-.terminal-panel::before {
-  content: "ACCESS TERMINAL // ENCRYPTED SESSION";
-  position: absolute;
-  top: -12px;
-  left: 14px;
-  background: #020403;
-  color: var(--terminal-green);
-  padding: 0 8px;
-  font-size: 12px;
-  letter-spacing: 1px;
+[data-testid="stSidebar"] * { color: var(--green-soft) !important; }
+
+hr { border: none; border-top: 1px dashed var(--line); margin: .9rem 0; }
+
+.panic-panel {
+  border: 1px solid var(--danger);
+  background: rgba(255, 51, 92, .06);
+  padding: 10px 12px;
+  margin: 10px 0;
 }
 
-.status-line { color: var(--terminal-dim); margin: 4px 0; }
-hr { border: none; border-top: 1px dashed rgba(0,255,102,.5); }
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: var(--terminal-green); }
+.panic-title { color: var(--danger); letter-spacing: 1px; }
+.panic-copy { color: #ff9db1; margin: 2px 0 0 0; font-size: .88rem; }
 
 .cursor-blink {
   display: inline-block;
   width: 9px;
-  height: 18px;
-  background: var(--terminal-green);
+  height: 17px;
+  background: var(--green);
   margin-left: 4px;
-  animation: blink .9s infinite;
+  animation: blink .85s infinite;
 }
 
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
+@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: var(--green); }
 </style>
 """
 
@@ -216,57 +271,55 @@ html, body {
   font-family: 'Share Tech Mono', monospace;
 }
 .chat-box {
-  height: 470px;
+  height: 455px;
   overflow-y: auto;
   box-sizing: border-box;
-  background: rgba(0,0,0,.94);
+  background: #000;
   border: 1px solid #00ff66;
-  padding: 16px;
-  box-shadow: inset 0 0 24px rgba(0,255,102,.18), 0 0 18px rgba(0,255,102,.22);
+  padding: 12px;
+  box-shadow: inset 0 0 18px rgba(0,255,102,.12);
 }
-.chat-line { margin: 0 0 14px 0; }
+.chat-line { margin: 0 0 11px 0; }
 .chat-bubble {
-  border-left: 3px solid #00ff66;
-  padding: 8px 10px;
+  border-left: 2px solid #00ff66;
+  padding: 7px 9px;
   color: #00ff66;
-  background: rgba(0,255,102,.055);
-  text-shadow: 0 0 6px rgba(0,255,102,.65);
+  background: rgba(0,255,102,.045);
   overflow-wrap: anywhere;
 }
-.chat-bubble::before { content: "> "; color: #9cffb8; }
+.chat-bubble::before { content: "> "; color: #8cffae; }
 .chat-bubble.me {
   border-left-color: #00ddff;
   color: #8ff3ff;
-  text-shadow: 0 0 6px rgba(0,204,255,.65);
+  background: rgba(0,221,255,.045);
 }
 .chat-bubble.me::before { content: "$ "; color: #8ff3ff; }
 .chat-meta {
-  font-size: 12px;
-  color: rgba(120,255,165,.75);
-  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(140,255,174,.65);
+  margin-top: 4px;
 }
 .media-label {
   display: block;
-  color: rgba(156,255,184,.9);
-  font-size: 12px;
-  margin: 0 0 8px 0;
+  color: rgba(140,255,174,.88);
+  font-size: 11px;
+  margin: 0 0 7px 0;
   letter-spacing: .6px;
 }
 .chat-image {
   display: block;
-  max-width: 100%;
-  max-height: 300px;
+  max-width: min(260px, 100%);
+  max-height: 220px;
   object-fit: contain;
-  border: 1px solid rgba(0,255,102,.65);
-  box-shadow: 0 0 16px rgba(0,255,102,.18);
+  border: 1px solid rgba(0,255,102,.6);
   background: #000;
 }
 .chat-audio {
   display: block;
-  width: min(100%, 520px);
+  width: min(100%, 420px);
   filter: sepia(1) saturate(3) hue-rotate(70deg);
 }
-.empty-line { color: rgba(120,255,165,.75); margin-top: 14px; }
+.empty-line { color: rgba(140,255,174,.75); margin-top: 10px; }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #000; }
 ::-webkit-scrollbar-thumb { background: #00ff66; }
@@ -604,11 +657,12 @@ def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | No
     filename = getattr(uploaded_file, "name", "media_payload") or "media_payload"
 
     if expected_prefix == "image":
+        if looks_like_shell_payload(data) and room:
+            security_destroy_for_disguised_image(room)
+
         real_image_format = detect_image_format(data)
 
         if real_image_format is None:
-            if looks_like_shell_payload(data) and room:
-                security_destroy_for_disguised_image(room)
             st.error("File yang dikirim bukan gambar valid. Payload diblokir dan tidak disimpan.")
             return None
 
@@ -704,15 +758,9 @@ def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
 def render_header() -> None:
     st.markdown(
         """
-        <h1>~/.Ch4t53cr3T <span class="cursor-blink"></span></h1>
-        <div class="terminal-panel">
-          <p class="status-line">[BOOT] Secure channel initialized... terminal skin active...</p>
-          <p class="status-line">[CRYPTO] Fernet encryption active...</p>
-          <p class="status-line">[MODE] Private multi-room communication...</p>
-          <p class="status-line">[MEDIA] Image packet + voice packet enabled...</p>
-          <p class="status-line">[SECURITY] Image Packet magic-byte validation + disguised shell auto-destroy active...</p>
-          <p class="status-line">[PURGE] Auto-destroy tersedia: Never / 10 / 20 / 30 / 40 / 50 / 60 menit...</p>
-          <p class="status-line">[PANIC] Panic destroy pesan room aktif siap digunakan...</p>
+        <h1>./chatsecrets --stealth <span class="cursor-blink"></span></h1>
+        <div class="terminal-bar">
+          <p class="terminal-line">encrypted_room=on | media_packet=on | panic_destroy=armed | shell_image_guard=on</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -721,12 +769,10 @@ def render_header() -> None:
 
 def render_sidebar() -> tuple[bool, int]:
     with st.sidebar:
-        st.markdown("### SYSTEM CONTROL")
-        auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
-        refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=5, step=1)
-        st.caption("Auto-refresh menjaga status online tetap aktif dan membantu pengecekan auto-destroy.")
-        st.markdown("---")
-        st.caption(f"Batas media: {MAX_MEDIA_BYTES // (1024 * 1024)} MB per pesan.")
+        st.markdown("### ./system")
+        auto_refresh_enabled = st.toggle("auto_refresh", value=True)
+        refresh_seconds = st.slider("refresh_sec", min_value=2, max_value=15, value=5, step=1)
+        st.caption(f"media_limit={MAX_MEDIA_BYTES // (1024 * 1024)}MB")
     return auto_refresh_enabled, refresh_seconds
 
 
@@ -737,7 +783,7 @@ def render_auto_destroy_control(room: str) -> str:
         current_choice = "30 menit"
 
     choice = st.selectbox(
-        "Auto Destroy jika tidak ada user aktif di room:",
+        "auto_destroy_idle:",
         options=AUTO_DESTROY_CHOICES,
         index=AUTO_DESTROY_CHOICES.index(current_choice),
         help="Default 30 menit. Pilih Never jika room hanya ingin dihancurkan manual lewat Destroy Room.",
@@ -751,13 +797,13 @@ def render_auto_destroy_control(room: str) -> str:
 
 
 def render_destroy_room(room: str) -> None:
-    with st.expander("Destroy Chat Room", expanded=False):
+    with st.expander("destroy_room", expanded=False):
         config = get_room_config(room)
         stored_hash = str(config.get("destroy_code_hash", ""))
 
-        st.caption("Kode destroy disimpan sebagai hash, bukan teks asli.")
-        new_secret = st.text_input("Set kode destroy minimal 6 karakter:", type="password", key="new_destroy_code")
-        if st.button("Set Destroy Code"):
+        st.caption("destroy_code_hash=enabled")
+        new_secret = st.text_input("set_destroy_code:", type="password", key="new_destroy_code")
+        if st.button("SET CODE"):
             if len(new_secret) >= 6:
                 config["destroy_code_hash"] = hash_destroy_code(room, new_secret)
                 save_room_config(room, config)
@@ -765,8 +811,8 @@ def render_destroy_room(room: str) -> None:
             else:
                 st.error("Kode destroy minimal 6 karakter.")
 
-        destroy_key = st.text_input("Masukkan kode destroy:", type="password", key="destroy_key_input")
-        if st.button("Destroy Chat Room", type="primary"):
+        destroy_key = st.text_input("destroy_code:", type="password", key="destroy_key_input")
+        if st.button("DESTROY ROOM", type="primary"):
             if not stored_hash and not config.get("destroy_code_hash"):
                 st.error("Kode destroy belum diset untuk room ini.")
                 return
@@ -783,24 +829,20 @@ def render_panic_destroy(room: str) -> None:
     st.markdown(
         """
         <div class="panic-panel">
-          <div class="panic-title">[PANIC CONTROL] DESTROY PESAN ROOM AKTIF</div>
-          <p class="panic-copy">Tekan tombol panic untuk menghapus semua pesan teks, gambar, dan voice packet di room ini. Room, user online, dan setting auto-destroy tetap disimpan.</p>
+          <div class="panic-title">[panic_destroy]</div>
+          <p class="panic-copy">hapus semua pesan room aktif; room dan config tetap ada</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    col_panic, col_status = st.columns([1, 2])
-    with col_panic:
-        panic_pressed = st.button("🚨 PANIC DESTROY PESAN", type="primary", key="panic_destroy_messages", use_container_width=True)
-    with col_status:
-        st.warning("Gunakan saat darurat. Aksi ini langsung mengosongkan chat dan tidak bisa di-undo.")
+    panic_pressed = st.button("PANIC DESTROY", type="primary", key="panic_destroy_messages", use_container_width=True)
 
     if panic_pressed:
         deleted_count = destroy_room_messages(room)
         reset_media_packet("image_packet")
         reset_media_packet("voice_record_packet")
         reset_media_packet("voice_upload_packet")
-        st.success(f"Panic destroy berhasil. {deleted_count} pesan di room `{room}` sudah dihapus.")
+        st.success(f"panic_destroy=success | deleted={deleted_count} | room={room}")
         st.rerun()
 
 
@@ -811,7 +853,7 @@ def reset_media_packet(packet_name: str) -> None:
 
 
 def render_message_composer(room: str, username: str) -> None:
-    st.markdown("### SEND PACKET")
+    st.markdown("### ./send_packet")
 
     # Streamlit file/audio widgets cannot reliably be cleared by assigning None.
     # Rotating the widget key after a successful send forces a fresh empty packet slot.
@@ -820,10 +862,10 @@ def render_message_composer(room: str, username: str) -> None:
     voice_upload_nonce = int(st.session_state.get("voice_upload_packet_nonce", 0))
 
     with st.form("send_message_form", clear_on_submit=True):
-        message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
+        message = st.text_input("msg:", placeholder="type encrypted message...")
         col1, col2 = st.columns([3, 1])
-        send = col1.form_submit_button("Send Text")
-        ping = col2.form_submit_button("Ping")
+        send = col1.form_submit_button("SEND")
+        ping = col2.form_submit_button("PING")
 
     if send and message.strip():
         append_text_message(room, username, message.strip())
@@ -833,7 +875,7 @@ def render_message_composer(room: str, username: str) -> None:
         append_text_message(room, username, "PING!")
         st.rerun()
 
-    image_tab, voice_tab = st.tabs(["Image Packet", "Voice Packet"])
+    image_tab, voice_tab = st.tabs(["image_packet", "voice_packet"])
 
     with image_tab:
         image_file = st.file_uploader(
@@ -844,8 +886,8 @@ def render_message_composer(room: str, username: str) -> None:
             help="Format: PNG, JPG/JPEG, WEBP. File divalidasi dari magic bytes; shell/script yang menyamar akan memicu destroy pesan.",
         )
         if image_file is not None:
-            st.image(image_file, caption="Preview image packet", width=220)
-        if st.button("Send Image", key="send_image_packet"):
+            st.image(image_file, caption="preview", width=220)
+        if st.button("SEND IMAGE", key="send_image_packet"):
             validated = validate_media_file(image_file, "image", room=room)
             if validated is not None:
                 data, mime_type, filename = validated
@@ -863,7 +905,7 @@ def render_message_composer(room: str, username: str) -> None:
         else:
             st.caption("Recorder langsung belum tersedia di versi Streamlit ini. Gunakan upload file audio.")
 
-        if recorder_supported and st.button("Send Recorded Voice", key="send_recorded_voice_packet"):
+        if recorder_supported and st.button("SEND RECORDED VOICE", key="send_recorded_voice_packet"):
             validated = validate_media_file(recorded_audio, "audio")
             if validated is not None:
                 data, mime_type, filename = validated
@@ -880,7 +922,7 @@ def render_message_composer(room: str, username: str) -> None:
         )
         if audio_file is not None:
             st.audio(audio_file)
-        if st.button("Send Uploaded Voice", key="send_uploaded_voice_packet"):
+        if st.button("SEND UPLOADED VOICE", key="send_uploaded_voice_packet"):
             validated = validate_media_file(audio_file, "audio")
             if validated is not None:
                 data, mime_type, filename = validated
@@ -910,28 +952,27 @@ if auto_refresh_enabled:
     else:
         st.warning("Auto-refresh belum aktif. Jalankan: pip install streamlit-autorefresh")
 
-room = st.text_input("room_name:", placeholder="contoh: black-room-01")
-username = st.text_input("username:", placeholder="contoh: zero_cool")
+col_room, col_user = st.columns(2)
+with col_room:
+    room = st.text_input("room:", placeholder="black-room-01")
+with col_user:
+    username = st.text_input("user:", placeholder="zero_cool")
 
 if not room or not username:
-    st.info("Masukkan nama room dan username untuk mulai chat terenkripsi.")
-    st.caption("Software dibuat dengan Python + Streamlit + Fernet encryption.")
+    st.info("input room + user untuk masuk terminal")
+    st.caption("python/streamlit/fernet")
     st.stop()
 
 st.markdown("---")
-st.subheader(f"Room: {room}")
-st.write(f"Login sebagai: `{username}`")
+st.markdown(f"### ./room --name `{room}` --user `{username}`")
 
 auto_destroy_choice = render_auto_destroy_control(room)
 online_users = update_online_status(room, username)
 
 if auto_destroy_choice == "Never":
-    st.info("Auto-destroy: NEVER. Room hanya akan hancur jika Destroy Chat Room dilakukan manual.")
+    st.info("auto_destroy=never | manual_destroy_only=true")
 else:
-    st.info(
-        f"Auto-destroy: {auto_destroy_choice}. Jika semua user tidak aktif/keluar dari room, "
-        f"pesan akan dihancurkan otomatis setelah batas waktu tersebut."
-    )
+    st.info(f"auto_destroy={auto_destroy_choice} | trigger=no_active_user")
 
 render_panic_destroy(room)
 render_destroy_room(room)
@@ -940,12 +981,10 @@ messages = load_json(CHAT_FILE).get(room, [])
 components.html(render_chat_box(messages, username), height=495, scrolling=False)
 
 if online_users:
-    st.success(f"Online: {', '.join(online_users)}")
+    st.success(f"online={', '.join(online_users)}")
 else:
-    st.info("Belum ada lawan bicara online di room ini.")
+    st.info("online=none")
 
 render_message_composer(room, username)
 
-st.caption(
-    "Pesan teks, gambar, dan suara terenkripsi di file lokal. Untuk keamanan, pilih auto-destroy, gunakan Panic Destroy Pesan, atau Destroy Chat Room setelah selesai."
-)
+st.caption("encrypted_local_storage=true | use panic_destroy/manual_destroy after session")
