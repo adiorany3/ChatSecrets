@@ -5,12 +5,10 @@ import io
 import json
 import math
 import os
-import secrets
 import struct
 import time
 import uuid
 import wave
-from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -32,10 +30,6 @@ FERNET_KEY_FILE = "fernet.key"
 CHAT_FILE = "chat_rooms.json"
 ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
-PRIVATE_LINKS_FILE = "private_links.json"
-ADMIN_PASSWORD_FILE = "admin_password.txt"
-PRIVATE_ACCESS_TOKEN_PARAM = "access"
-PRIVATE_ROOM_PARAM = "room"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
 WIB = timezone(timedelta(hours=7))
@@ -327,173 +321,6 @@ def wib_timestamp() -> str:
     return datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S WIB")
 
 # ==============================
-# PRIVATE LINK + ADMIN HELPERS
-# ==============================
-def get_query_param(name: str) -> str:
-    """Return a query-param value with compatibility for older/newer Streamlit."""
-    try:
-        value = st.query_params.get(name, "")
-    except Exception:
-        try:
-            params = st.experimental_get_query_params()
-            value = params.get(name, "")
-        except Exception:
-            value = ""
-
-    if isinstance(value, list):
-        return str(value[0]) if value else ""
-    return str(value) if value is not None else ""
-
-
-def get_private_links() -> dict[str, Any]:
-    return load_json(PRIVATE_LINKS_FILE)
-
-
-def save_private_links(links: dict[str, Any]) -> None:
-    save_json(PRIVATE_LINKS_FILE, links)
-
-
-def get_admin_password() -> str:
-    """Use env secret first; otherwise create a local random password once."""
-    env_password = os.environ.get("CHATSECRETS_ADMIN_PASSWORD", "").strip()
-    if env_password:
-        return env_password
-
-    if os.path.exists(ADMIN_PASSWORD_FILE):
-        try:
-            with open(ADMIN_PASSWORD_FILE, "r", encoding="utf-8") as file:
-                password = file.read().strip()
-            if password:
-                return password
-        except OSError:
-            pass
-
-    password = secrets.token_urlsafe(18)
-    with open(ADMIN_PASSWORD_FILE, "w", encoding="utf-8") as file:
-        file.write(password)
-    try:
-        os.chmod(ADMIN_PASSWORD_FILE, 0o600)
-    except OSError:
-        pass
-    return password
-
-
-def require_admin_login() -> bool:
-    if st.session_state.get("admin_authenticated"):
-        return True
-
-    st.info("Masukkan password admin untuk membuat dan mengelola private link.")
-    st.caption("Set env `CHATSECRETS_ADMIN_PASSWORD` untuk password permanen. Jika belum diset, aplikasi membuat `admin_password.txt` otomatis di folder project.")
-    password = st.text_input("Admin password:", type="password", key="admin_password_input")
-    if st.button("Login Admin", use_container_width=True):
-        if password and password == get_admin_password():
-            st.session_state["admin_authenticated"] = True
-            st.success("Login admin berhasil.")
-            st.rerun()
-        else:
-            st.error("Password admin salah.")
-    return False
-
-
-def create_private_link(room: str, created_by: str = "admin") -> tuple[str, str]:
-    clean_room = sanitize_room_name(room)
-    token = secrets.token_urlsafe(24)
-    links = get_private_links()
-    links[token] = {
-        "room": clean_room,
-        "active": True,
-        "created_at": wib_timestamp(),
-        "created_by": created_by,
-    }
-    save_private_links(links)
-    relative_link = f"?{PRIVATE_ROOM_PARAM}={quote(clean_room, safe='')}&{PRIVATE_ACCESS_TOKEN_PARAM}={quote(token, safe='')}"
-    return token, relative_link
-
-
-def validate_private_access() -> tuple[bool, str, str]:
-    token = get_query_param(PRIVATE_ACCESS_TOKEN_PARAM).strip()
-    room_from_url = sanitize_room_name(get_query_param(PRIVATE_ROOM_PARAM))
-    if not token:
-        return False, "", "Private access token tidak ditemukan."
-
-    link_data = get_private_links().get(token)
-    if not isinstance(link_data, dict):
-        return False, "", "Private link tidak valid atau sudah dihapus."
-
-    if not link_data.get("active", True):
-        return False, "", "Private link sudah dinonaktifkan oleh admin."
-
-    linked_room = sanitize_room_name(str(link_data.get("room", "")))
-    if not linked_room:
-        return False, "", "Private link rusak: room tidak ditemukan."
-
-    if room_from_url and room_from_url != linked_room:
-        return False, "", "Private link tidak cocok dengan room pada URL."
-
-    if is_room_destroyed(linked_room):
-        return False, linked_room, "Room pada private link ini sudah dihancurkan."
-
-    return True, linked_room, token
-
-
-def render_full_reload_script(remove_query_params: bool = False) -> None:
-    target = "window.parent.location.pathname" if remove_query_params else "window.parent.location.href"
-    components.html(
-        f"""
-        <!doctype html>
-        <html>
-        <body>
-          <script>
-            setTimeout(function() {{
-              window.parent.location.replace({target});
-            }}, 80);
-          </script>
-        </body>
-        </html>
-        """,
-        height=0,
-        scrolling=False,
-    )
-
-
-def render_private_link_builder(relative_link: str) -> None:
-    relative_js = json.dumps(relative_link)
-    components.html(
-        f"""
-        <!doctype html>
-        <html>
-        <body style="margin:0;padding:0;background:transparent;font-family:monospace;color:#00ff66;">
-          <div style="border:1px solid #00ff66;padding:10px;background:#020403;">
-            <div style="margin-bottom:8px;">PRIVATE LINK:</div>
-            <input id="privateLink" readonly style="width:100%;box-sizing:border-box;background:#000;color:#00ff66;border:1px solid #00ff66;padding:8px;font-family:monospace;" />
-            <button id="copyLink" style="margin-top:8px;background:#001a08;color:#00ff66;border:1px solid #00ff66;padding:7px 10px;font-family:monospace;cursor:pointer;">COPY LINK</button>
-            <span id="copyStatus" style="margin-left:8px;font-size:12px;"></span>
-          </div>
-          <script>
-            const relative = {relative_js};
-            const full = window.parent.location.origin + window.parent.location.pathname + relative;
-            const input = document.getElementById('privateLink');
-            const status = document.getElementById('copyStatus');
-            input.value = full;
-            document.getElementById('copyLink').addEventListener('click', async () => {{
-              try {{
-                await navigator.clipboard.writeText(full);
-                status.textContent = 'copied';
-              }} catch (e) {{
-                input.focus();
-                input.select();
-                status.textContent = 'select manual';
-              }}
-            }});
-          </script>
-        </body>
-        </html>
-        """,
-        height=125,
-        scrolling=False,
-    )
-
-# ==============================
 # ROOM DESTROY HELPERS
 # ==============================
 def sanitize_room_name(room: str) -> str:
@@ -537,20 +364,6 @@ def destroy_room_completely(room: str, username: str = "system", reason: str = "
     }
     save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
 
-    private_links = get_private_links()
-    private_links_changed = False
-    for token, link_data in private_links.items():
-        if not isinstance(link_data, dict):
-            continue
-        if sanitize_room_name(str(link_data.get("room", ""))) == clean_room:
-            link_data["active"] = False
-            link_data["revoked_at"] = wib_timestamp()
-            link_data["revoked_reason"] = f"room_destroyed:{reason}"
-            private_links[token] = link_data
-            private_links_changed = True
-    if private_links_changed:
-        save_private_links(private_links)
-
 
 def clear_current_room_session(room: str | None = None) -> None:
     if ROOM_INPUT_KEY in st.session_state:
@@ -564,7 +377,6 @@ def panic_destroy_current_room(room: str, username: str) -> None:
     clean_room = sanitize_room_name(room)
     destroy_room_completely(clean_room, username=username, reason="panic_button")
     clear_current_room_session(clean_room)
-    st.session_state["force_browser_reload_after_destroy"] = True
 
 
 def destroy_current_room_with_code(room: str, username: str) -> None:
@@ -578,7 +390,6 @@ def destroy_current_room_with_code(room: str, username: str) -> None:
         st.session_state.pop(secret_key, None)
         st.session_state["destroy_code_ok"] = True
         clear_current_room_session(clean_room)
-        st.session_state["force_browser_reload_after_destroy"] = True
     else:
         st.session_state["destroy_code_error"] = True
 
@@ -881,18 +692,16 @@ def render_header() -> None:
     )
 
 
-def render_sidebar() -> tuple[str, bool, int, bool, bool]:
+def render_sidebar() -> tuple[bool, int, bool, bool]:
     with st.sidebar:
-        st.markdown("### NAVIGATION")
-        page_mode = st.radio("Halaman", ["Chat", "Admin"], index=0, key="page_mode")
         st.markdown("### SYSTEM CONTROL")
         auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
         refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=3, step=1)
         sound_enabled = st.toggle("Suara pesan masuk", value=True)
         test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
         st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
-        st.caption("Room hanya bisa dibuka lewat private link dari admin.")
-        return page_mode, auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
+        st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
+        return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
 def update_online_status(room: str, username: str) -> list[str]:
@@ -911,79 +720,6 @@ def update_online_status(room: str, username: str) -> list[str]:
         if user != username and now_epoch - int(last_seen) <= 10
     ]
 
-
-def render_admin_page() -> None:
-    st.subheader("Admin // Private Link Control")
-    st.write("Buat private link untuk room. User hanya bisa masuk chat jika membuka URL yang membawa token akses valid.")
-
-    if not require_admin_login():
-        st.stop()
-
-    with st.form("create_private_link_form", clear_on_submit=False):
-        admin_name = st.text_input("Admin name:", value="admin", key="admin_creator_name")
-        target_room = st.text_input("Room untuk private link:", placeholder="contoh: black-room-01", key="admin_target_room")
-        create_link = st.form_submit_button("Create Private Link")
-
-    if create_link:
-        clean_room = sanitize_room_name(target_room)
-        if not clean_room:
-            st.error("Nama room tidak boleh kosong.")
-        elif is_room_destroyed(clean_room):
-            st.error("Room ini sudah dihancurkan. Gunakan nama room baru.")
-        else:
-            token, relative_link = create_private_link(clean_room, created_by=admin_name.strip() or "admin")
-            st.session_state["last_private_relative_link"] = relative_link
-            st.session_state["last_private_token"] = token
-            st.session_state["last_private_room"] = clean_room
-            st.success("Private link berhasil dibuat.")
-
-    last_link = st.session_state.get("last_private_relative_link")
-    if last_link:
-        st.markdown("#### Link terbaru")
-        render_private_link_builder(str(last_link))
-        st.caption("Bagikan link ini ke user yang boleh masuk. Tanpa token pada link, room tidak bisa dibuka.")
-
-    st.markdown("---")
-    st.markdown("#### Private link aktif")
-    links = get_private_links()
-    if not links:
-        st.info("Belum ada private link.")
-        return
-
-    for token, data in sorted(links.items(), key=lambda item: str(item[1].get("created_at", "")), reverse=True):
-        if not isinstance(data, dict):
-            continue
-        room_name = sanitize_room_name(str(data.get("room", "")))
-        active = bool(data.get("active", True))
-        created_at = str(data.get("created_at", "-"))
-        created_by = str(data.get("created_by", "admin"))
-        relative_link = f"?{PRIVATE_ROOM_PARAM}={quote(room_name, safe='')}&{PRIVATE_ACCESS_TOKEN_PARAM}={quote(token, safe='')}"
-        status = "ACTIVE" if active else "REVOKED"
-        with st.expander(f"{room_name} // {status} // {created_at}", expanded=False):
-            st.write(f"Created by: `{created_by}`")
-            st.code(relative_link, language="text")
-            col_a, col_b, col_c = st.columns(3)
-            if active:
-                if col_a.button("Revoke", key=f"revoke_{token}"):
-                    links[token]["active"] = False
-                    links[token]["revoked_at"] = wib_timestamp()
-                    save_private_links(links)
-                    st.rerun()
-            else:
-                if col_a.button("Activate", key=f"activate_{token}"):
-                    links[token]["active"] = True
-                    links[token].pop("revoked_at", None)
-                    save_private_links(links)
-                    st.rerun()
-            if col_b.button("Delete Link", key=f"delete_{token}"):
-                links.pop(token, None)
-                save_private_links(links)
-                st.rerun()
-            if col_c.button("Copy as latest", key=f"copy_latest_{token}"):
-                st.session_state["last_private_relative_link"] = relative_link
-                st.session_state["last_private_token"] = token
-                st.session_state["last_private_room"] = room_name
-                st.rerun()
 
 def render_destroy_room(room: str, username: str) -> None:
     clean_room = sanitize_room_name(room)
@@ -1036,32 +772,11 @@ st.markdown(APP_CSS, unsafe_allow_html=True)
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
-# Important: clear stale destroyed room before widgets are created.
+# Important: clear stale destroyed room before text_input widgets are created.
 auto_clear_destroyed_room_before_widgets()
 
 render_header()
-page_mode, auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested = render_sidebar()
-
-if st.session_state.pop("force_browser_reload_after_destroy", False):
-    st.success("Room dihancurkan. Browser akan di-refresh dan query private link dibersihkan.")
-    render_full_reload_script(remove_query_params=True)
-    st.stop()
-
-if page_mode == "Admin":
-    render_admin_page()
-    st.stop()
-
-valid_access, linked_room, access_status = validate_private_access()
-if not valid_access:
-    st.error(access_status)
-    st.info("Room tidak bisa dibuka manual. Minta private link dari admin, atau masuk ke halaman Admin untuk membuat link.")
-    st.caption("Format link: `?room=nama-room&access=token-rahasia`.")
-    if linked_room:
-        render_full_reload_script(remove_query_params=True)
-    st.stop()
-
-room = sanitize_room_name(linked_room)
-st.session_state[ROOM_INPUT_KEY] = room
+auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested = render_sidebar()
 
 if auto_refresh_enabled:
     if st_autorefresh is not None:
@@ -1071,33 +786,31 @@ if auto_refresh_enabled:
 
 notice_room = st.session_state.pop("destroyed_room_notice", None)
 if notice_room:
-    st.success(f"Room `{notice_room}` sudah dihancurkan. Data terhapus, status online dihapus, private link tidak bisa dipakai, dan browser akan keluar dari room.")
+    st.success(f"Room `{notice_room}` sudah dihancurkan. Data terhapus, status online dihapus, dan nama room dikosongkan dari sesi ini.")
 
 if st.session_state.pop("destroy_code_error", False):
     st.error("Kode destroy salah atau belum diset.")
 
-if room and is_room_destroyed(room):
-    st.error("Room ini sudah dihancurkan dan tidak bisa dipakai lagi.")
-    render_full_reload_script(remove_query_params=True)
-    st.stop()
-
-st.session_state["locked_room_name_display"] = room
-st.text_input(
+room = st.text_input(
     "room_name:",
-    value=room,
-    disabled=True,
-    key="locked_room_name_display",
-    help="Room dikunci dari private link. User tanpa token tidak bisa masuk.",
+    placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
+    key=ROOM_INPUT_KEY,
 )
 username = st.text_input(
     "username:",
     placeholder="contoh: zero_cool",
     key=USERNAME_INPUT_KEY,
 )
+
+room = sanitize_room_name(room)
 username = username.strip()
 
-if not username:
-    st.info("Masukkan username untuk mulai chat terenkripsi lewat private link ini.")
+if room and is_room_destroyed(room):
+    st.error("Room ini sudah dihancurkan dan tidak bisa dipakai lagi. Buat nama room baru.")
+    st.stop()
+
+if not room or not username:
+    st.info("Masukkan nama room dan username untuk mulai chat terenkripsi.")
     st.caption("Software dibuat dengan Python + Streamlit + Fernet encryption.")
     st.stop()
 
@@ -1107,7 +820,7 @@ st.markdown("---")
 st.subheader(f"Room: {room}")
 st.write(f"Login sebagai: `{username}`")
 st.info(
-    f"Private link verified. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} "
+    f"Session aktif 30 menit. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} "
     f"setiap {refresh_seconds} detik. Suara: {'ON' if sound_enabled else 'OFF'}."
 )
 
