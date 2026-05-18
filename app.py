@@ -587,7 +587,7 @@ def render_header() -> None:
         # root@ChatSecrets:~# ./secure-terminal
 
         [BOOT] Hacker terminal theme loaded...  
-        [CRYPTO] Fernet encryption active from hidden TOML secret..  
+        [CRYPTO] Fernet encryption active..  
         [MODE] Private multi-room communication..  
         [TRACE] Room status, online users, and encrypted logs are displayed in terminal style..  
         [WARNING] Use Panic Room / Destroy Room after use for maximum privacy..
