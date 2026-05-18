@@ -490,10 +490,27 @@ def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_
 
     return f"""
     <style>{CHAT_COMPONENT_CSS}</style>
-    <div class="chat-box">{sound_panel}{body}</div>
+    <div id="chatBox" class="chat-box">{sound_panel}{body}<div id="chatBottom"></div></div>
     <audio id="chatSound" src="{escaped_sound_src}"></audio>
     <script>
       window.chatSound = document.getElementById('chatSound');
+
+      function scrollChatToBottom() {{
+        const chatBox = document.getElementById('chatBox');
+        const chatBottom = document.getElementById('chatBottom');
+        if (!chatBox) return;
+
+        chatBox.scrollTop = chatBox.scrollHeight;
+        if (chatBottom) {{
+          chatBottom.scrollIntoView({{ block: 'end', behavior: 'auto' }});
+        }}
+      }}
+
+      window.addEventListener('load', scrollChatToBottom);
+      requestAnimationFrame(scrollChatToBottom);
+      setTimeout(scrollChatToBottom, 80);
+      setTimeout(scrollChatToBottom, 250);
+
       if ({play_flag}) {{
         window.chatSound.currentTime = 0;
         window.chatSound.play().catch(() => {{}});
@@ -588,6 +605,7 @@ def render_sidebar() -> tuple[bool, int, bool, bool]:
         test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
         st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
+        st.caption("Fernet key tersimpan di `.streamlit/secrets.toml`, bukan di `fernet.key`.")
         return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
