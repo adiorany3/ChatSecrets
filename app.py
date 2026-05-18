@@ -588,7 +588,6 @@ def render_sidebar() -> tuple[bool, int, bool, bool]:
         test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
         st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
-        st.caption("Fernet key tersimpan di `.streamlit/secrets.toml`, bukan di `fernet.key`.")
         return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
