@@ -33,6 +33,8 @@ ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
+ROOM_REUSE_WAIT_MINUTES = 10
+ROOM_REUSE_WAIT_SECONDS = ROOM_REUSE_WAIT_MINUTES * 60
 WIB = timezone(timedelta(hours=7))
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
@@ -355,19 +357,83 @@ def sanitize_room_name(room: str) -> str:
     return room.strip()
 
 
+def _parse_wib_timestamp(timestamp_text: str) -> datetime | None:
+    try:
+        clean_text = timestamp_text.replace(" WIB", "")
+        return datetime.strptime(clean_text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=WIB)
+    except Exception:
+        return None
+
+
 def get_destroyed_rooms() -> dict[str, Any]:
-    return load_json(DESTROYED_ROOMS_FILE)
+    """
+    Membaca daftar room yang dihancurkan.
+    Room yang sudah lewat 10 menit otomatis dihapus dari destroyed_rooms.json,
+    sehingga nama room bisa digunakan kembali dan tidak meninggalkan jejak.
+    """
+    destroyed_rooms = load_json(DESTROYED_ROOMS_FILE)
+    now = datetime.now(WIB)
+    changed = False
+
+    for room_name, data in list(destroyed_rooms.items()):
+        destroyed_at_text = str(data.get("destroyed_at", ""))
+        destroyed_at = _parse_wib_timestamp(destroyed_at_text)
+
+        if destroyed_at is None:
+            destroyed_rooms.pop(room_name, None)
+            changed = True
+            continue
+
+        elapsed_seconds = (now - destroyed_at).total_seconds()
+
+        if elapsed_seconds >= ROOM_REUSE_WAIT_SECONDS:
+            destroyed_rooms.pop(room_name, None)
+            changed = True
+
+    if changed:
+        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
+
+    return destroyed_rooms
+
+
+def get_room_remaining_lock_seconds(room: str) -> int:
+    clean_room = sanitize_room_name(room)
+    destroyed_rooms = get_destroyed_rooms()
+
+    if clean_room not in destroyed_rooms:
+        return 0
+
+    destroyed_at_text = str(destroyed_rooms[clean_room].get("destroyed_at", ""))
+    destroyed_at = _parse_wib_timestamp(destroyed_at_text)
+
+    if destroyed_at is None:
+        destroyed_rooms.pop(clean_room, None)
+        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
+        return 0
+
+    elapsed_seconds = int((datetime.now(WIB) - destroyed_at).total_seconds())
+    remaining_seconds = ROOM_REUSE_WAIT_SECONDS - elapsed_seconds
+
+    if remaining_seconds <= 0:
+        destroyed_rooms.pop(clean_room, None)
+        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
+        return 0
+
+    return remaining_seconds
 
 
 def is_room_destroyed(room: str) -> bool:
     clean_room = sanitize_room_name(room)
+
     if not clean_room:
         return False
-    return clean_room in get_destroyed_rooms()
+
+    return get_room_remaining_lock_seconds(clean_room) > 0
 
 
 def destroy_room_completely(room: str, username: str = "system", reason: str = "panic") -> None:
     clean_room = sanitize_room_name(room)
+
     if not clean_room:
         return
 
@@ -391,7 +457,9 @@ def destroy_room_completely(room: str, username: str = "system", reason: str = "
 def clear_current_room_session(room: str | None = None) -> None:
     if ROOM_INPUT_KEY in st.session_state:
         st.session_state[ROOM_INPUT_KEY] = ""
+
     st.session_state.pop("last_message_signature", None)
+
     if room:
         st.session_state["destroyed_room_notice"] = sanitize_room_name(room)
 
@@ -419,6 +487,7 @@ def destroy_current_room_with_code(room: str, username: str) -> None:
 
 def auto_clear_destroyed_room_before_widgets() -> None:
     room_in_session = sanitize_room_name(str(st.session_state.get(ROOM_INPUT_KEY, "")))
+
     if room_in_session and is_room_destroyed(room_in_session):
         clear_current_room_session(room_in_session)
 
@@ -666,7 +735,10 @@ if auto_refresh_enabled:
 
 notice_room = st.session_state.pop("destroyed_room_notice", None)
 if notice_room:
-    st.success(f"Room `{notice_room}` sudah dihancurkan. Data terhapus, status online dihapus, dan nama room dikosongkan dari sesi ini.")
+    st.success(
+        f"Room `{notice_room}` sudah dihancurkan. Data chat dan status online sudah dihapus. "
+        f"Nama room dapat digunakan kembali setelah 10 menit."
+    )
 
 if st.session_state.pop("destroy_code_error", False):
     st.error("Kode destroy salah atau belum diset.")
@@ -682,7 +754,14 @@ room = sanitize_room_name(room)
 username = username.strip()
 
 if room and is_room_destroyed(room):
-    st.error("Room ini sudah dihancurkan dan tidak bisa dipakai lagi. Buat nama room baru.")
+    remaining_seconds = get_room_remaining_lock_seconds(room)
+    remaining_minutes = remaining_seconds // 60
+    remaining_second_only = remaining_seconds % 60
+
+    st.error(
+        f"Room ini baru saja dihancurkan. Nama room dapat digunakan kembali dalam "
+        f"{remaining_minutes} menit {remaining_second_only} detik."
+    )
     st.stop()
 
 if not room or not username:
