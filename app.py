@@ -10,6 +10,7 @@ import time
 import uuid
 import wave
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -25,8 +26,8 @@ except Exception:
 # CONFIG
 # ==============================
 APP_TITLE = "ChatSecrets Terminal"
-APP_ICON = "🟢"
-FERNET_KEY_FILE = "fernet.key"
+APP_ICON = ""
+SECRETS_FILE = Path(".streamlit") / "secrets.toml"
 CHAT_FILE = "chat_rooms.json"
 ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
@@ -37,234 +38,42 @@ WIB = timezone(timedelta(hours=7))
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
 
 # ==============================
-# CSS: MAIN STREAMLIT PAGE
+# CSS
 # ==============================
 APP_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-:root {
-  --terminal-bg: #020403;
-  --terminal-green: #00ff66;
-  --terminal-dim: rgba(120, 255, 165, 0.82);
-  --terminal-panel: rgba(0, 18, 7, 0.92);
-  --terminal-danger: #ff3131;
+.stApp {
+    background: radial-gradient(circle at top, #06210f 0%, #000 45%, #000 100%);
+    color: #00ff66;
 }
-
-html, body, [data-testid="stAppViewContainer"] {
-  background: radial-gradient(circle at top, #082313 0%, #020403 40%, #000 100%) !important;
-  color: var(--terminal-green) !important;
-  font-family: 'Share Tech Mono', monospace !important;
-}
-
 [data-testid="stSidebar"] {
-  background: #010301 !important;
-  border-right: 1px solid rgba(0,255,102,.34);
+    background: #020403;
+    border-right: 1px solid rgba(0,255,102,.35);
 }
-
-[data-testid="stSidebar"] * {
-  color: var(--terminal-green) !important;
-  font-family: 'Share Tech Mono', monospace !important;
+.block-container {
+    padding-top: 2rem;
 }
-
-h1, h2, h3, p, label, span, div, textarea, input, button {
-  font-family: 'Share Tech Mono', monospace !important;
-}
-
-h1, h2, h3 {
-  color: var(--terminal-green) !important;
-  text-shadow: 0 0 10px rgba(0,255,102,.75);
-  letter-spacing: 1px;
-}
-
-[data-testid="stTextInput"] input {
-  background: rgba(0, 0, 0, 0.86) !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid rgba(0,255,102,.65) !important;
-  border-radius: 0 !important;
-  box-shadow: inset 0 0 14px rgba(0,255,102,.12);
-}
-
-.stButton > button, [data-testid="stFormSubmitButton"] button {
-  background: #001a08 !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid var(--terminal-green) !important;
-  border-radius: 0 !important;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 0 10px rgba(0,255,102,.16);
-}
-
-.stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
-  background: var(--terminal-green) !important;
-  color: #000 !important;
-  box-shadow: 0 0 24px rgba(0,255,102,.85);
-}
-
-.stAlert {
-  background: rgba(0, 25, 8, 0.88) !important;
-  color: var(--terminal-green) !important;
-  border: 1px solid rgba(0,255,102,.55) !important;
-  border-radius: 0 !important;
-  box-shadow: 0 0 14px rgba(0,255,102,.18);
-}
-
-.terminal-panel {
-  background: var(--terminal-panel);
-  border: 1px solid var(--terminal-green);
-  box-shadow: 0 0 24px rgba(0,255,102,.24);
-  padding: 18px;
-  margin: 18px 0 24px 0;
-  position: relative;
-}
-
-.terminal-panel::before {
-  content: "ACCESS TERMINAL // ENCRYPTED SESSION";
-  position: absolute;
-  top: -12px;
-  left: 14px;
-  background: #020403;
-  color: var(--terminal-green);
-  padding: 0 8px;
-  font-size: 12px;
-  letter-spacing: 1px;
-}
-
-.status-line {
-  color: var(--terminal-dim);
-  margin: 4px 0;
-}
-
-.panic-panel {
-  border: 1px solid rgba(255,49,49,.75);
-  box-shadow: 0 0 20px rgba(255,49,49,.22);
-  padding: 12px;
-  background: rgba(30, 0, 0, .45);
-  margin-top: 12px;
-}
-
-.panic-title {
-  color: var(--terminal-danger);
-  text-shadow: 0 0 10px rgba(255,49,49,.72);
-  margin-bottom: 8px;
-}
-
-hr {
-  border: none;
-  border-top: 1px dashed rgba(0,255,102,.5);
-}
-
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: var(--terminal-green); }
-
-.cursor-blink {
-  display: inline-block;
-  width: 9px;
-  height: 18px;
-  background: var(--terminal-green);
-  margin-left: 4px;
-  animation: blink 0.9s infinite;
-}
-
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+input, textarea {
+    font-family: monospace !important;
 }
 </style>
 """
 
-# ==============================
-# CSS: CHAT COMPONENT IFRAME
-# ==============================
 CHAT_COMPONENT_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-html, body {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  font-family: 'Share Tech Mono', monospace;
-}
-.chat-box {
-  height: 430px;
-  overflow-y: auto;
-  box-sizing: border-box;
-  background: rgba(0, 0, 0, 0.94);
-  border: 1px solid #00ff66;
-  padding: 16px;
-  box-shadow: inset 0 0 24px rgba(0,255,102,.14), 0 0 18px rgba(0,255,102,.2);
-  color: #00ff66;
-}
-.chat-box::before {
-  content: "CHAT LOG // LIVE FEED";
-  display: block;
-  color: #6dff9a;
-  border-bottom: 1px dashed rgba(0,255,102,.45);
-  padding-bottom: 8px;
-  margin-bottom: 10px;
-  letter-spacing: 1px;
-}
-.sound-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 10px;
-  margin-bottom: 10px;
-  border: 1px dashed rgba(0,255,102,.45);
-  background: rgba(0, 255, 102, 0.04);
-  color: rgba(120,255,165,.88);
-  font-size: 12px;
-}
-.sound-panel button {
-  background: #001a08;
-  color: #00ff66;
-  border: 1px solid #00ff66;
-  padding: 6px 9px;
-  cursor: pointer;
-  font-family: 'Share Tech Mono', monospace;
-  text-transform: uppercase;
-}
-.sound-panel button:hover {
-  background: #00ff66;
-  color: #000;
-}
-.chat-bubble {
-  background: transparent;
-  border-left: 3px solid #00ff66;
-  padding: 10px 12px;
-  margin: 10px 0;
-  color: #00ff66;
-  text-shadow: 0 0 6px rgba(0,255,102,.65);
-  word-wrap: break-word;
-  overflow-wrap: anywhere;
-}
-.chat-bubble::before {
-  content: "> ";
-  color: #9cffb8;
-}
-.chat-bubble.me {
-  border-left-color: #00ddff;
-  color: #8ff3ff;
-  text-shadow: 0 0 6px rgba(0,204,255,.65);
-}
-.chat-bubble.me::before {
-  content: "$ ";
-  color: #8ff3ff;
-}
-.chat-message-text {
-  display: inline;
-  white-space: normal;
-}
-.chat-meta {
-  font-size: 12px;
-  color: rgba(120,255,165,.75);
-  margin-top: 6px;
-}
-.empty-line {
-  color: rgba(120,255,165,.75);
-  margin-top: 14px;
-}
+html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share Tech Mono', monospace; }
+.chat-box { height: 430px; overflow-y: auto; box-sizing: border-box; background: rgba(0, 0, 0, 0.94); border: 1px solid #00ff66; padding: 16px; box-shadow: inset 0 0 24px rgba(0,255,102,.14), 0 0 18px rgba(0,255,102,.2); color: #00ff66; }
+.chat-box::before { content: "CHAT LOG // LIVE FEED"; display: block; color: #6dff9a; border-bottom: 1px dashed rgba(0,255,102,.45); padding-bottom: 8px; margin-bottom: 10px; letter-spacing: 1px; }
+.sound-panel { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; margin-bottom: 10px; border: 1px dashed rgba(0,255,102,.45); background: rgba(0, 255, 102, 0.04); color: rgba(120,255,165,.88); font-size: 12px; }
+.sound-panel button { background: #001a08; color: #00ff66; border: 1px solid #00ff66; padding: 6px 9px; cursor: pointer; font-family: 'Share Tech Mono', monospace; text-transform: uppercase; }
+.sound-panel button:hover { background: #00ff66; color: #000; }
+.chat-bubble { background: transparent; border-left: 3px solid #00ff66; padding: 10px 12px; margin: 10px 0; color: #00ff66; text-shadow: 0 0 6px rgba(0,255,102,.65); word-wrap: break-word; overflow-wrap: anywhere; }
+.chat-bubble::before { content: "> "; color: #9cffb8; }
+.chat-bubble.me { border-left-color: #00ddff; color: #8ff3ff; text-shadow: 0 0 6px rgba(0,204,255,.65); }
+.chat-bubble.me::before { content: "$ "; color: #8ff3ff; }
+.chat-message-text { display: inline; white-space: normal; }
+.chat-meta { font-size: 12px; color: rgba(120,255,165,.75); margin-top: 6px; }
+.empty-line { color: rgba(120,255,165,.75); margin-top: 14px; }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #000; }
 ::-webkit-scrollbar-thumb { background: #00ff66; }
@@ -291,15 +100,72 @@ def save_json(path: str, data: dict[str, Any]) -> None:
     os.replace(tmp_path, path)
 
 
+def _read_fernet_key_from_toml() -> str | None:
+    """Read Fernet key from .streamlit/secrets.toml without adding a toml dependency."""
+    if not SECRETS_FILE.exists():
+        return None
+
+    in_secrets_section = False
+    for raw_line in SECRETS_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_secrets_section = line == "[secrets]"
+            continue
+        if in_secrets_section and line.startswith("fernet_key") and "=" in line:
+            _, value = line.split("=", 1)
+            return value.strip().strip('"').strip("'")
+    return None
+
+
+def _write_fernet_key_to_toml(key: bytes) -> None:
+    """Store generated Fernet key inside the hidden Streamlit TOML file."""
+    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    key_text = key.decode("utf-8")
+    content = (
+        "# File ini menyimpan secret lokal untuk ChatSecrets.\n"
+        "# Jangan commit / upload file ini ke repository publik.\n\n"
+        "[secrets]\n"
+        f'fernet_key = "{key_text}"\n'
+    )
+    SECRETS_FILE.write_text(content, encoding="utf-8")
+
+
+def get_fernet_key() -> bytes:
+    """
+    Fernet key sekarang disembunyikan di file TOML:
+    .streamlit/secrets.toml pada bagian [secrets].fernet_key
+    """
+    key_text = None
+
+    try:
+        if "secrets" in st.secrets and "fernet_key" in st.secrets["secrets"]:
+            key_text = str(st.secrets["secrets"]["fernet_key"])
+        elif "fernet_key" in st.secrets:
+            key_text = str(st.secrets["fernet_key"])
+    except Exception:
+        key_text = None
+
+    if not key_text:
+        key_text = _read_fernet_key_from_toml()
+
+    if not key_text:
+        generated_key = Fernet.generate_key()
+        _write_fernet_key_to_toml(generated_key)
+        return generated_key
+
+    key = key_text.encode("utf-8")
+    try:
+        Fernet(key)
+    except Exception as exc:
+        st.error("Fernet key di `.streamlit/secrets.toml` tidak valid. Gunakan key dari `Fernet.generate_key()`. ")
+        raise exc
+    return key
+
+
 def get_fernet() -> Fernet:
-    if not os.path.exists(FERNET_KEY_FILE):
-        key = Fernet.generate_key()
-        with open(FERNET_KEY_FILE, "wb") as file:
-            file.write(key)
-    else:
-        with open(FERNET_KEY_FILE, "rb") as file:
-            key = file.read()
-    return Fernet(key)
+    return Fernet(get_fernet_key())
 
 
 def encrypt_message(text: str) -> str:
@@ -339,11 +205,6 @@ def is_room_destroyed(room: str) -> bool:
 
 
 def destroy_room_completely(room: str, username: str = "system", reason: str = "panic") -> None:
-    """Delete chat data, online presence, and mark room as destroyed.
-
-    The destroyed-room marker prevents the same room from being silently recreated
-    by users whose browser still has the old room name in session state.
-    """
     clean_room = sanitize_room_name(room)
     if not clean_room:
         return
@@ -395,7 +256,6 @@ def destroy_current_room_with_code(room: str, username: str) -> None:
 
 
 def auto_clear_destroyed_room_before_widgets() -> None:
-    """Kick any stale browser session out of a destroyed room before widgets render."""
     room_in_session = sanitize_room_name(str(st.session_state.get(ROOM_INPUT_KEY, "")))
     if room_in_session and is_room_destroyed(room_in_session):
         clear_current_room_session(room_in_session)
@@ -426,14 +286,11 @@ def get_message_signature(messages: list[dict[str, Any]]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def should_play_incoming_sound(
-    messages: list[dict[str, Any]],
-    current_username: str,
-    sound_enabled: bool,
-) -> bool:
+def should_play_incoming_sound(messages: list[dict[str, Any]], current_username: str, sound_enabled: bool) -> bool:
     current_signature = get_message_signature(messages)
     previous_signature = st.session_state.get("last_message_signature")
     st.session_state.last_message_signature = current_signature
+
     if not sound_enabled or not messages or previous_signature is None:
         return False
     latest_sender = str(messages[-1].get("username", ""))
@@ -461,114 +318,28 @@ def render_chat_messages(messages: list[dict[str, Any]], current_username: str) 
     return "".join(chat_parts)
 
 
-def render_chat_box(
-    messages: list[dict[str, Any]],
-    current_username: str,
-    play_incoming_sound: bool,
-    sound_enabled: bool,
-    sound_data_uri: str,
-) -> str:
+def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_incoming_sound: bool, sound_enabled: bool, sound_data_uri: str) -> str:
     body = render_chat_messages(messages, current_username)
     play_flag = "true" if play_incoming_sound else "false"
     escaped_sound_src = html.escape(sound_data_uri, quote=True)
+
     sound_panel = """
-    <div class="sound-panel" id="soundPanel">
-      <span id="soundStatus">[AUDIO] Klik unlock untuk mengaktifkan suara pesan masuk.</span>
-      <button id="unlockSound" type="button">Unlock Sound</button>
-    </div>
+    <div class="sound-panel"><span>[AUDIO] Klik unlock untuk mengaktifkan suara pesan masuk.</span><button onclick="window.chatSound.play()">Unlock Sound</button></div>
     """ if sound_enabled else """
-    <div class="sound-panel">
-      <span>[AUDIO] Suara pesan masuk dimatikan dari sidebar.</span>
-    </div>
+    <div class="sound-panel">[AUDIO] Suara pesan masuk dimatikan dari sidebar.</div>
     """
 
     return f"""
-    <!doctype html>
-    <html>
-    <head>
-      <style>{CHAT_COMPONENT_CSS}</style>
-    </head>
-    <body>
-      <div class="chat-box" id="chatBox">
-        {sound_panel}
-        {body}
-      </div>
-      <script>
-        const shouldPlay = {play_flag};
-        const beepSrc = "{escaped_sound_src}";
-        const chatBox = document.getElementById('chatBox');
-        const unlockButton = document.getElementById('unlockSound');
-        const soundStatus = document.getElementById('soundStatus');
-
-        function setSoundStatus() {{
-          if (!soundStatus) return;
-          const unlocked = localStorage.getItem('chatsecrets_sound_unlocked') === 'yes';
-          soundStatus.textContent = unlocked
-            ? '[AUDIO] Suara aktif. Incoming packet akan berbunyi.'
-            : '[AUDIO] Klik unlock untuk mengaktifkan suara pesan masuk.';
-        }}
-
-        function playHackerTone() {{
-          try {{
-            const audio = new Audio(beepSrc);
-            audio.volume = 0.75;
-            const promise = audio.play();
-            if (promise !== undefined) {{
-              promise.catch(() => playOscillatorFallback());
-            }}
-          }} catch (error) {{
-            playOscillatorFallback();
-          }}
-        }}
-
-        function playOscillatorFallback() {{
-          try {{
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            const ctx = new AudioContext();
-            const master = ctx.createGain();
-            master.gain.setValueAtTime(0.0001, ctx.currentTime);
-            master.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.025);
-            master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
-            master.connect(ctx.destination);
-
-            const notes = [740, 990, 520, 1180];
-            notes.forEach((frequency, index) => {{
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              const start = ctx.currentTime + index * 0.09;
-              const end = start + 0.075;
-              osc.type = index % 2 ? 'square' : 'sawtooth';
-              osc.frequency.setValueAtTime(frequency, start);
-              gain.gain.setValueAtTime(0.0001, start);
-              gain.gain.exponentialRampToValueAtTime(0.32, start + 0.012);
-              gain.gain.exponentialRampToValueAtTime(0.0001, end);
-              osc.connect(gain);
-              gain.connect(master);
-              osc.start(start);
-              osc.stop(end + 0.02);
-            }});
-            setTimeout(() => ctx.close(), 700);
-          }} catch (error) {{}}
-        }}
-
-        if (unlockButton) {{
-          unlockButton.addEventListener('click', () => {{
-            localStorage.setItem('chatsecrets_sound_unlocked', 'yes');
-            setSoundStatus();
-            playHackerTone();
-          }});
-        }}
-
-        setSoundStatus();
-        chatBox.scrollTop = chatBox.scrollHeight;
-
-        if (shouldPlay && localStorage.getItem('chatsecrets_sound_unlocked') === 'yes') {{
-          setTimeout(playHackerTone, 120);
-        }}
-      </script>
-    </body>
-    </html>
+    <style>{CHAT_COMPONENT_CSS}</style>
+    <div class="chat-box">{sound_panel}{body}</div>
+    <audio id="chatSound" src="{escaped_sound_src}"></audio>
+    <script>
+      window.chatSound = document.getElementById('chatSound');
+      if ({play_flag}) {{
+        window.chatSound.currentTime = 0;
+        window.chatSound.play().catch(() => {{}});
+      }}
+    </script>
     """
 
 
@@ -588,7 +359,6 @@ def append_message(room: str, username: str, message_text: str) -> None:
 # AUDIO HELPERS
 # ==============================
 def build_hacker_wav_data_uri() -> str:
-    """Generate a short hacker-style beep as an inline WAV data URI."""
     sample_rate = 44100
     notes = [740, 990, 520, 1180]
     note_duration = 0.085
@@ -620,59 +390,17 @@ def build_hacker_wav_data_uri() -> str:
     return f"data:audio/wav;base64,{encoded}"
 
 
-HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
-
-
 def render_page_sound_trigger(sound_data_uri: str) -> str:
     escaped_src = html.escape(sound_data_uri, quote=True)
     return f"""
-    <!doctype html>
-    <html>
-    <body style="margin:0;padding:0;background:transparent;">
-      <audio id="incomingSound" src="{escaped_src}" preload="auto" autoplay></audio>
-      <script>
-        const audio = document.getElementById('incomingSound');
-        audio.volume = 0.75;
-
-        function webAudioFallback() {{
-          try {{
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            const ctx = new AudioContext();
-            const master = ctx.createGain();
-            master.gain.setValueAtTime(0.0001, ctx.currentTime);
-            master.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.025);
-            master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.42);
-            master.connect(ctx.destination);
-            [740, 990, 520, 1180].forEach((frequency, index) => {{
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              const start = ctx.currentTime + index * 0.09;
-              const end = start + 0.075;
-              osc.type = index % 2 ? 'square' : 'sawtooth';
-              osc.frequency.setValueAtTime(frequency, start);
-              gain.gain.setValueAtTime(0.0001, start);
-              gain.gain.exponentialRampToValueAtTime(0.3, start + 0.012);
-              gain.gain.exponentialRampToValueAtTime(0.0001, end);
-              osc.connect(gain);
-              gain.connect(master);
-              osc.start(start);
-              osc.stop(end + 0.02);
-            }});
-            setTimeout(() => ctx.close(), 700);
-          }} catch (error) {{}}
-        }}
-
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {{
-          playPromise.catch(() => webAudioFallback());
-        }} else {{
-          webAudioFallback();
-        }}
-      </script>
-    </body>
-    </html>
+    <audio id="pageSound" src="{escaped_src}"></audio>
+    <script>
+      const sound = document.getElementById('pageSound');
+      sound.play().catch(() => {{}});
+    </script>
     """
+
+HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
 
 # ==============================
 # UI HELPERS
@@ -680,13 +408,12 @@ def render_page_sound_trigger(sound_data_uri: str) -> str:
 def render_header() -> None:
     st.markdown(
         """
-        <h1>~/.Ch4t53cr3T <span class="cursor-blink"></span></h1>
-        <div class="terminal-panel">
-          <p class="status-line">[BOOT] Secure channel initialized... Dark Mode recommended.. Screen must be on..</p>
-          <p class="status-line">[CRYPTO] Fernet encryption active..</p>
-          <p class="status-line">[MODE] Private multi-room communication..</p>
-          <p class="status-line">[WARNING] Destroy room after use for maximum privacy..</p>
-        </div>
+        # ~/.Ch4t53cr3T
+
+        [BOOT] Secure channel initialized... Dark Mode recommended.. Screen must be on..  
+        [CRYPTO] Fernet encryption active from hidden TOML secret..  
+        [MODE] Private multi-room communication..  
+        [WARNING] Destroy room after use for maximum privacy..
         """,
         unsafe_allow_html=True,
     )
@@ -701,6 +428,7 @@ def render_sidebar() -> tuple[bool, int, bool, bool]:
         test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
         st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
+        st.caption("Fernet key tersimpan di `.streamlit/secrets.toml`, bukan di `fernet.key`.")
         return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
@@ -715,8 +443,10 @@ def update_online_status(room: str, username: str) -> list[str]:
     online.setdefault(clean_room, {})
     online[clean_room][username] = now_epoch
     save_json(ONLINE_FILE, online)
+
     return [
-        user for user, last_seen in online.get(clean_room, {}).items()
+        user
+        for user, last_seen in online.get(clean_room, {}).items()
         if user != username and now_epoch - int(last_seen) <= 10
     ]
 
@@ -726,10 +456,9 @@ def render_destroy_room(room: str, username: str) -> None:
     with st.expander("Destroy / Panic Room", expanded=False):
         st.markdown(
             """
-            <div class="panic-panel">
-              <div class="panic-title">[PANIC ROOM]</div>
-              <div>Tekan tombol ini untuk menghapus data room, menghapus status online room, mengunci nama room, lalu mengeluarkan user dari room.</div>
-            </div>
+            [PANIC ROOM]
+
+            Tekan tombol ini untuk menghapus data room, menghapus status online room, mengunci nama room, lalu mengeluarkan user dari room.
             """,
             unsafe_allow_html=True,
         )
@@ -740,9 +469,9 @@ def render_destroy_room(room: str, username: str) -> None:
             on_click=panic_destroy_current_room,
             args=(clean_room, username),
         )
-
         st.markdown("---")
         st.caption("Opsional: pakai kode destroy kalau ingin tombol destroy dengan verifikasi.")
+
         secret_key = f"destroy_secret_{clean_room}"
         if secret_key not in st.session_state:
             st.session_state[secret_key] = ""
@@ -772,9 +501,7 @@ st.markdown(APP_CSS, unsafe_allow_html=True)
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
-# Important: clear stale destroyed room before text_input widgets are created.
 auto_clear_destroyed_room_before_widgets()
-
 render_header()
 auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested = render_sidebar()
 
@@ -796,11 +523,7 @@ room = st.text_input(
     placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
     key=ROOM_INPUT_KEY,
 )
-username = st.text_input(
-    "username:",
-    placeholder="contoh: zero_cool",
-    key=USERNAME_INPUT_KEY,
-)
+username = st.text_input("username:", placeholder="contoh: zero_cool", key=USERNAME_INPUT_KEY)
 
 room = sanitize_room_name(room)
 username = username.strip()
@@ -815,23 +538,22 @@ if not room or not username:
     st.stop()
 
 online_users = update_online_status(room, username)
-
 st.markdown("---")
 st.subheader(f"Room: {room}")
 st.write(f"Login sebagai: `{username}`")
 st.info(
-    f"Session aktif 30 menit. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} "
-    f"setiap {refresh_seconds} detik. Suara: {'ON' if sound_enabled else 'OFF'}."
+    f"Session aktif 30 menit. Auto-refresh: {'ON' if auto_refresh_enabled else 'OFF'} setiap {refresh_seconds} detik. "
+    f"Suara: {'ON' if sound_enabled else 'OFF'}."
 )
 
 render_destroy_room(room, username)
 
-# Stop immediately if a callback destroyed the room and cleared the field.
 if not st.session_state.get(ROOM_INPUT_KEY):
     st.stop()
 
 messages = load_json(CHAT_FILE).get(room, [])
 play_incoming_sound = should_play_incoming_sound(messages, username, sound_enabled)
+
 components.html(
     render_chat_box(messages, username, play_incoming_sound, sound_enabled, HACKER_SOUND_DATA_URI),
     height=455,
@@ -839,13 +561,10 @@ components.html(
 )
 
 if sound_enabled and (play_incoming_sound or test_sound_requested):
-    components.html(
-        render_page_sound_trigger(HACKER_SOUND_DATA_URI),
-        height=0,
-        scrolling=False,
-    )
-    if test_sound_requested:
-        st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
+    components.html(render_page_sound_trigger(HACKER_SOUND_DATA_URI), height=0, scrolling=False)
+
+if test_sound_requested:
+    st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
 
 with st.form("send_message_form", clear_on_submit=True):
     message = st.text_input("command_message:", placeholder="ketik pesan rahasia...")
