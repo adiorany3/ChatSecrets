@@ -605,6 +605,7 @@ def render_sidebar() -> tuple[bool, int, bool, bool]:
         test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
         st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
+        st.caption("Fernet key tersimpan di `.streamlit/secrets.toml`, bukan di `fernet.key`.")
         return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
 
@@ -643,29 +644,6 @@ def render_destroy_room(room: str, username: str) -> None:
             use_container_width=True,
             key=f"panic_room_{clean_room}",
             on_click=panic_destroy_current_room,
-            args=(clean_room, username),
-        )
-        st.markdown("---")
-        st.caption("Opsional: pakai kode destroy kalau ingin tombol destroy dengan verifikasi.")
-
-        secret_key = f"destroy_secret_{clean_room}"
-        if secret_key not in st.session_state:
-            st.session_state[secret_key] = ""
-
-        new_secret = st.text_input("Set kode destroy minimal 6 karakter:", type="password", key=f"new_destroy_secret_{clean_room}")
-        if st.button("Set Destroy Code", key=f"set_destroy_code_{clean_room}"):
-            if len(new_secret) >= 6:
-                st.session_state[secret_key] = new_secret
-                st.success("Kode destroy berhasil disimpan untuk room ini.")
-            else:
-                st.error("Kode destroy minimal 6 karakter.")
-
-        st.text_input("Masukkan kode destroy:", type="password", key="destroy_key_input")
-        st.button(
-            "Destroy Chat Room dengan Kode",
-            use_container_width=True,
-            key=f"destroy_room_code_{clean_room}",
-            on_click=destroy_current_room_with_code,
             args=(clean_room, username),
         )
 
