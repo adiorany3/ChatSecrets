@@ -203,6 +203,9 @@ html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share
 .chat-box {
   height: 430px;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-behavior: auto;
   box-sizing: border-box;
   position: relative;
   background:
@@ -490,20 +493,17 @@ def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_
 
     return f"""
     <style>{CHAT_COMPONENT_CSS}</style>
-    <div id="chatBox" class="chat-box">{sound_panel}{body}<div id="chatBottom"></div></div>
+    <div id="chatBox" class="chat-box">{sound_panel}{body}</div>
     <audio id="chatSound" src="{escaped_sound_src}"></audio>
     <script>
       window.chatSound = document.getElementById('chatSound');
 
       function scrollChatToBottom() {{
         const chatBox = document.getElementById('chatBox');
-        const chatBottom = document.getElementById('chatBottom');
         if (!chatBox) return;
 
+        // Scroll hanya area pesan, bukan halaman utama Streamlit.
         chatBox.scrollTop = chatBox.scrollHeight;
-        if (chatBottom) {{
-          chatBottom.scrollIntoView({{ block: 'end', behavior: 'auto' }});
-        }}
       }}
 
       window.addEventListener('load', scrollChatToBottom);
