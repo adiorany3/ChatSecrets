@@ -33,7 +33,7 @@ ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
-ROOM_REUSE_WAIT_MINUTES = 10
+ROOM_REUSE_WAIT_MINUTES = 3
 ROOM_REUSE_WAIT_SECONDS = ROOM_REUSE_WAIT_MINUTES * 60
 WIB = timezone(timedelta(hours=7))
 
@@ -368,7 +368,7 @@ def _parse_wib_timestamp(timestamp_text: str) -> datetime | None:
 def get_destroyed_rooms() -> dict[str, Any]:
     """
     Membaca daftar room yang dihancurkan.
-    Room yang sudah lewat 10 menit otomatis dihapus dari destroyed_rooms.json,
+    Room yang sudah lewat 3 menit otomatis dihapus dari destroyed_rooms.json,
     sehingga nama room bisa digunakan kembali dan tidak meninggalkan jejak.
     """
     destroyed_rooms = load_json(DESTROYED_ROOMS_FILE)
@@ -457,6 +457,9 @@ def destroy_room_completely(room: str, username: str = "system", reason: str = "
 def clear_current_room_session(room: str | None = None) -> None:
     if ROOM_INPUT_KEY in st.session_state:
         st.session_state[ROOM_INPUT_KEY] = ""
+
+    if USERNAME_INPUT_KEY in st.session_state:
+        st.session_state[USERNAME_INPUT_KEY] = ""
 
     st.session_state.pop("last_message_signature", None)
 
@@ -737,7 +740,7 @@ notice_room = st.session_state.pop("destroyed_room_notice", None)
 if notice_room:
     st.success(
         f"Room `{notice_room}` sudah dihancurkan. Data chat dan status online sudah dihapus. "
-        f"Nama room dapat digunakan kembali setelah 10 menit."
+        f"Nama room dapat digunakan kembali setelah 3 menit."
     )
 
 if st.session_state.pop("destroy_code_error", False):
