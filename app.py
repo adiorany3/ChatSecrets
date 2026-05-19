@@ -33,7 +33,7 @@ ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
-ROOM_REUSE_WAIT_MINUTES = 3
+ROOM_REUSE_WAIT_MINUTES = 0.5
 ROOM_REUSE_WAIT_SECONDS = ROOM_REUSE_WAIT_MINUTES * 60
 WIB = timezone(timedelta(hours=7))
 
@@ -368,7 +368,7 @@ def _parse_wib_timestamp(timestamp_text: str) -> datetime | None:
 def get_destroyed_rooms() -> dict[str, Any]:
     """
     Membaca daftar room yang dihancurkan.
-    Room yang sudah lewat 3 menit otomatis dihapus dari destroyed_rooms.json,
+    Room yang sudah lewat 30 detik otomatis dihapus dari destroyed_rooms.json,
     sehingga nama room bisa digunakan kembali dan tidak meninggalkan jejak.
     """
     destroyed_rooms = load_json(DESTROYED_ROOMS_FILE)
