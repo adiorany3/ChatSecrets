@@ -33,8 +33,9 @@ ONLINE_FILE = "online_status.json"
 DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
-ROOM_REUSE_WAIT_MINUTES = 0.5
-ROOM_REUSE_WAIT_SECONDS = ROOM_REUSE_WAIT_MINUTES * 60
+LOCKED_ROOM_KEY = "locked_room_name"
+LOCKED_USERNAME_KEY = "locked_username"
+ROOM_REUSE_WAIT_SECONDS = 30
 WIB = timezone(timedelta(hours=7))
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
@@ -461,6 +462,8 @@ def clear_current_room_session(room: str | None = None) -> None:
     if USERNAME_INPUT_KEY in st.session_state:
         st.session_state[USERNAME_INPUT_KEY] = ""
 
+    st.session_state.pop(LOCKED_ROOM_KEY, None)
+    st.session_state.pop(LOCKED_USERNAME_KEY, None)
     st.session_state.pop("last_message_signature", None)
 
     if room:
@@ -493,6 +496,29 @@ def auto_clear_destroyed_room_before_widgets() -> None:
 
     if room_in_session and is_room_destroyed(room_in_session):
         clear_current_room_session(room_in_session)
+
+
+def get_locked_username() -> str:
+    return str(st.session_state.get(LOCKED_USERNAME_KEY, "")).strip()
+
+
+def sync_locked_username_before_widget() -> None:
+    locked_username = get_locked_username()
+
+    if locked_username and st.session_state.get(USERNAME_INPUT_KEY) != locked_username:
+        st.session_state[USERNAME_INPUT_KEY] = locked_username
+
+
+def lock_username_after_entering_room(room: str, username: str) -> None:
+    clean_room = sanitize_room_name(room)
+    clean_username = username.strip()
+
+    if not clean_room or not clean_username or get_locked_username():
+        return
+
+    st.session_state[LOCKED_ROOM_KEY] = clean_room
+    st.session_state[LOCKED_USERNAME_KEY] = clean_username
+    st.rerun()
 
 # ==============================
 # CHAT HELPERS
@@ -746,15 +772,27 @@ if notice_room:
 if st.session_state.pop("destroy_code_error", False):
     st.error("Kode destroy salah atau belum diset.")
 
+sync_locked_username_before_widget()
+locked_username = get_locked_username()
+username_is_locked = bool(locked_username)
+
 room = st.text_input(
     "room_name >",
     placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
     key=ROOM_INPUT_KEY,
 )
-username = st.text_input("username >", placeholder="contoh: SubZero1", key=USERNAME_INPUT_KEY)
+username = st.text_input(
+    "username >",
+    placeholder="contoh: SubZero1",
+    key=USERNAME_INPUT_KEY,
+    disabled=username_is_locked,
+)
 
 room = sanitize_room_name(room)
-username = username.strip()
+username = locked_username if username_is_locked else username.strip()
+
+if username_is_locked:
+    st.caption("Username sudah terkunci setelah masuk room dan tidak bisa diganti pada session ini.")
 
 if room and is_room_destroyed(room):
     remaining_seconds = get_room_remaining_lock_seconds(room)
@@ -771,6 +809,8 @@ if not room or not username:
     st.info("Masukkan nama room dan username untuk mulai chat terenkripsi.")
     st.caption("Software dibuat dengan Python + Streamlit + Fernet encryption.")
     st.stop()
+
+lock_username_after_entering_room(room, username)
 
 online_users = update_online_status(room, username)
 st.markdown("---")
