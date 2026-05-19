@@ -748,7 +748,7 @@ room = st.text_input(
     placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
     key=ROOM_INPUT_KEY,
 )
-username = st.text_input("username >", placeholder="contoh: zero_cool", key=USERNAME_INPUT_KEY)
+username = st.text_input("username >", placeholder="contoh: SubZero1", key=USERNAME_INPUT_KEY)
 
 room = sanitize_room_name(room)
 username = username.strip()
