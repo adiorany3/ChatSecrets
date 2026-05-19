@@ -498,8 +498,19 @@ def auto_clear_destroyed_room_before_widgets() -> None:
         clear_current_room_session(room_in_session)
 
 
+def get_locked_room() -> str:
+    return sanitize_room_name(str(st.session_state.get(LOCKED_ROOM_KEY, "")))
+
+
 def get_locked_username() -> str:
     return str(st.session_state.get(LOCKED_USERNAME_KEY, "")).strip()
+
+
+def sync_locked_room_before_widget() -> None:
+    locked_room = get_locked_room()
+
+    if locked_room and st.session_state.get(ROOM_INPUT_KEY) != locked_room:
+        st.session_state[ROOM_INPUT_KEY] = locked_room
 
 
 def sync_locked_username_before_widget() -> None:
@@ -509,11 +520,11 @@ def sync_locked_username_before_widget() -> None:
         st.session_state[USERNAME_INPUT_KEY] = locked_username
 
 
-def lock_username_after_entering_room(room: str, username: str) -> None:
+def lock_room_and_username_after_entering_room(room: str, username: str) -> None:
     clean_room = sanitize_room_name(room)
     clean_username = username.strip()
 
-    if not clean_room or not clean_username or get_locked_username():
+    if not clean_room or not clean_username or get_locked_room() or get_locked_username():
         return
 
     st.session_state[LOCKED_ROOM_KEY] = clean_room
@@ -772,14 +783,18 @@ if notice_room:
 if st.session_state.pop("destroy_code_error", False):
     st.error("Kode destroy salah atau belum diset.")
 
+sync_locked_room_before_widget()
 sync_locked_username_before_widget()
+locked_room = get_locked_room()
 locked_username = get_locked_username()
+room_is_locked = bool(locked_room)
 username_is_locked = bool(locked_username)
 
 room = st.text_input(
     "room_name >",
     placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
     key=ROOM_INPUT_KEY,
+    disabled=room_is_locked,
 )
 username = st.text_input(
     "username >",
@@ -788,10 +803,14 @@ username = st.text_input(
     disabled=username_is_locked,
 )
 
-room = sanitize_room_name(room)
+room = locked_room if room_is_locked else sanitize_room_name(room)
 username = locked_username if username_is_locked else username.strip()
 
-if username_is_locked:
+if room_is_locked and username_is_locked:
+    st.caption("Room dan username sudah terkunci setelah masuk room pada session ini.")
+elif room_is_locked:
+    st.caption("Room sudah terkunci setelah masuk room dan tidak bisa diganti pada session ini.")
+elif username_is_locked:
     st.caption("Username sudah terkunci setelah masuk room dan tidak bisa diganti pada session ini.")
 
 if room and is_room_destroyed(room):
@@ -810,7 +829,7 @@ if not room or not username:
     st.caption("Software dibuat dengan Python + Streamlit + Fernet encryption.")
     st.stop()
 
-lock_username_after_entering_room(room, username)
+lock_room_and_username_after_entering_room(room, username)
 
 online_users = update_online_status(room, username)
 st.markdown("---")
