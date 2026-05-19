@@ -739,8 +739,8 @@ if auto_refresh_enabled:
 notice_room = st.session_state.pop("destroyed_room_notice", None)
 if notice_room:
     st.success(
-        f"Room `{notice_room}` sudah dihancurkan. Data chat dan status online sudah dihapus. "
-        f"Nama room dapat digunakan kembali setelah 3 menit."
+        f"Room `{notice_room}` sedang dibersihkan, agar Anda nyaman menggunakan room ini. "
+        f"Nama room dapat digunakan kembali setelah 3 menit, silahkan datang kembali nanti"
     )
 
 if st.session_state.pop("destroy_code_error", False):
