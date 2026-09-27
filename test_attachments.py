@@ -1,5 +1,4 @@
 """Run: python3 /Users/macbookpro/Documents/GitHub/ChatSecrets/test_attachments.py"""
-import ast
 import io
 from pathlib import Path
 import zipfile
@@ -26,23 +25,19 @@ for extension, entry in [("docx", "word/document.xml"), ("xlsx", "xl/workbook.xm
         archive.writestr(entry, "")
     assert validate_attachment("test." + extension, buffer.getvalue())
 
-# Extract storage helpers without starting Streamlit or touching real room data.
-tree = ast.parse(Path(__file__).with_name("app.py").read_text())
-helpers = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef)
-                         and node.name in ("make_message", "append_message")], type_ignores=[])
-from typing import Any
-import uuid
-rooms = {}
-saved = []
-namespace = dict(Any=Any, uuid=uuid, encrypt_message=lambda text: "encrypted:" + text,
-                 wib_now=lambda: "12:00", sanitize_room_name=str.strip,
-                 is_room_destroyed=lambda room: False, load_json=lambda path: rooms,
-                 save_json=lambda path, data: saved.append(data), CHAT_FILE="unused")
-exec(compile(helpers, "app.py", "exec"), namespace)
-attachment = {"name": "test.txt", "mime": "application/octet-stream", "data": "encrypted bytes"}
-namespace["append_message"]("room", "user", "caption", attachment)
-assert saved[0]["room"][0]["attachment"] == attachment
-assert saved[0]["room"][0]["text"] == "encrypted:caption"
-namespace["append_message"]("room", "user", "text only")
-assert "attachment" not in rooms["room"][1]
+# Test authenticated SQLite attachment persistence without touching production data.
+import tempfile
+from cryptography.fernet import Fernet
+from storage import Store
+temporary = tempfile.TemporaryDirectory()
+store = Store(Path(temporary.name) / "rooms.sqlite3", Fernet.generate_key())
+token = store.join("room", "user", "password123")
+attachment = {"name": "test.txt", "mime": "application/octet-stream", "data": store.fernet.encrypt(b"attachment bytes").decode()}
+store.send(token, "caption", attachment)
+store.send(token, "text only")
+messages = store.read(token)
+assert messages[0]["attachment"] == attachment
+assert store.fernet.decrypt(messages[0]["text"].encode()) == b"caption"
+assert "attachment" not in messages[1]
+temporary.cleanup()
 print("Attachment checks passed")

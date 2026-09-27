@@ -1,2 +1,10 @@
 .venv/
 __pycache__/
+.streamlit/secrets.toml
+.streamlit/fernet.key
+.streamlit/fernet.lock
+chat_rooms.json
+online_status.json
+destroyed_rooms.json
+private_links.json
+chatsecrets.sqlite3*

@@ -2,15 +2,10 @@ import base64
 import hashlib
 import html
 import io
-import json
 import math
-import os
+import sqlite3
 import struct
-import tempfile
-import time
-import uuid
 import wave
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +13,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from cryptography.fernet import Fernet, InvalidToken
 from attachments import FILE_TYPES, validate_attachment
+from storage import AuthError, Store, provision_key
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -29,16 +25,12 @@ except Exception:
 # ==============================
 APP_TITLE = "ChatSecrets"
 APP_ICON = "💻"
-SECRETS_FILE = Path(".streamlit") / "secrets.toml"
-CHAT_FILE = "chat_rooms.json"
-ONLINE_FILE = "online_status.json"
-DESTROYED_ROOMS_FILE = "destroyed_rooms.json"
+BASE_DIR = Path(__file__).resolve().parent
+SECRETS_FILE = BASE_DIR / ".streamlit" / "secrets.toml"
 ROOM_INPUT_KEY = "room_name_input"
 USERNAME_INPUT_KEY = "username_input"
 LOCKED_ROOM_KEY = "locked_room_name"
 LOCKED_USERNAME_KEY = "locked_username"
-ROOM_REUSE_WAIT_SECONDS = 30
-WIB = timezone(timedelta(hours=7))
 
 st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
 
@@ -213,105 +205,33 @@ html, body {
 # ==============================
 # STORAGE + CRYPTO HELPERS
 # ==============================
-def load_json(path: str) -> dict[str, Any]:
+@st.cache_resource
+def get_store() -> Store:
+    configured = None
     try:
-        with open(path, "r", encoding="utf-8") as file:
-            data = json.load(file)
+        configured = st.secrets.get("secrets", {}).get("fernet_key") or st.secrets.get("fernet_key")
     except FileNotFoundError:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Format penyimpanan tidak valid: {path}")
-    return data
+        pass
+    key = provision_key(SECRETS_FILE, configured)
+    return Store(BASE_DIR / "chatsecrets.sqlite3", key, legacy_dir=BASE_DIR)
 
 
-def save_json(path: str, data: dict[str, Any]) -> None:
-    # ponytail: atomic writes only; use SQLite transactions for concurrent updates.
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=Path(path).parent,
-            prefix=f".{Path(path).name}.", suffix=".tmp", delete=False,
-        ) as file:
-            tmp_path = file.name
-            json.dump(data, file, indent=2, ensure_ascii=False)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path is not None:
-            Path(tmp_path).unlink(missing_ok=True)
 
 
-def _read_fernet_key_from_toml() -> str | None:
-    """Read Fernet key from .streamlit/secrets.toml without adding a toml dependency."""
-    if not SECRETS_FILE.exists():
-        return None
-
-    in_secrets_section = False
-    for raw_line in SECRETS_FILE.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            in_secrets_section = line == "[secrets]"
-            continue
-        if in_secrets_section and line.startswith("fernet_key") and "=" in line:
-            _, value = line.split("=", 1)
-            return value.strip().strip('"').strip("'")
-    return None
 
 
-def _write_fernet_key_to_toml(key: bytes) -> None:
-    """Store generated Fernet key inside the hidden Streamlit TOML file."""
-    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    key_text = key.decode("utf-8")
-    content = (
-        "# File ini menyimpan secret lokal untuk ChatSecrets.\n"
-        "# Jangan commit / upload file ini ke repository publik.\n\n"
-        "[secrets]\n"
-        f'fernet_key = "{key_text}"\n'
-    )
-    SECRETS_FILE.write_text(content, encoding="utf-8")
 
 
-def get_fernet_key() -> bytes:
-    """
-    Fernet key sekarang disembunyikan di file TOML:
-    .streamlit/secrets.toml pada bagian [secrets].fernet_key
-    """
-    key_text = None
 
-    try:
-        if "secrets" in st.secrets and "fernet_key" in st.secrets["secrets"]:
-            key_text = str(st.secrets["secrets"]["fernet_key"])
-        elif "fernet_key" in st.secrets:
-            key_text = str(st.secrets["fernet_key"])
-    except Exception:
-        key_text = None
 
-    if not key_text:
-        key_text = _read_fernet_key_from_toml()
 
-    if not key_text:
-        generated_key = Fernet.generate_key()
-        _write_fernet_key_to_toml(generated_key)
-        return generated_key
 
-    key = key_text.encode("utf-8")
-    try:
-        Fernet(key)
-    except Exception as exc:
-        st.error("Fernet key di `.streamlit/secrets.toml` tidak valid. Gunakan key dari `Fernet.generate_key()`. ")
-        raise exc
-    return key
 
 
 def get_fernet() -> Fernet:
-    return Fernet(get_fernet_key())
+    return get_store().fernet
 
 
-def encrypt_message(text: str) -> str:
-    return get_fernet().encrypt(text.encode()).decode()
 
 
 def decrypt_message(text: str) -> str:
@@ -321,12 +241,7 @@ def decrypt_message(text: str) -> str:
         return "[Pesan tidak dapat didekripsi]"
 
 
-def wib_now() -> str:
-    return datetime.now(WIB).strftime("%H:%M")
 
-
-def wib_timestamp() -> str:
-    return datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S WIB")
 
 # ==============================
 # ROOM DESTROY HELPERS
@@ -335,101 +250,18 @@ def sanitize_room_name(room: str) -> str:
     return room.strip()
 
 
-def _parse_wib_timestamp(timestamp_text: str) -> datetime | None:
-    try:
-        clean_text = timestamp_text.replace(" WIB", "")
-        return datetime.strptime(clean_text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=WIB)
-    except Exception:
-        return None
 
 
-def get_destroyed_rooms() -> dict[str, Any]:
-    """
-    Membaca daftar room yang dihancurkan.
-    Room yang sudah lewat 30 detik otomatis dihapus dari destroyed_rooms.json,
-    sehingga nama room bisa digunakan kembali dan tidak meninggalkan jejak.
-    """
-    destroyed_rooms = load_json(DESTROYED_ROOMS_FILE)
-    now = datetime.now(WIB)
-    changed = False
-
-    for room_name, data in list(destroyed_rooms.items()):
-        destroyed_at_text = str(data.get("destroyed_at", ""))
-        destroyed_at = _parse_wib_timestamp(destroyed_at_text)
-
-        if destroyed_at is None:
-            destroyed_rooms.pop(room_name, None)
-            changed = True
-            continue
-
-        elapsed_seconds = (now - destroyed_at).total_seconds()
-
-        if elapsed_seconds >= ROOM_REUSE_WAIT_SECONDS:
-            destroyed_rooms.pop(room_name, None)
-            changed = True
-
-    if changed:
-        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
-
-    return destroyed_rooms
 
 
-def get_room_remaining_lock_seconds(room: str) -> int:
-    clean_room = sanitize_room_name(room)
-    destroyed_rooms = get_destroyed_rooms()
-
-    if clean_room not in destroyed_rooms:
-        return 0
-
-    destroyed_at_text = str(destroyed_rooms[clean_room].get("destroyed_at", ""))
-    destroyed_at = _parse_wib_timestamp(destroyed_at_text)
-
-    if destroyed_at is None:
-        destroyed_rooms.pop(clean_room, None)
-        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
-        return 0
-
-    elapsed_seconds = int((datetime.now(WIB) - destroyed_at).total_seconds())
-    remaining_seconds = ROOM_REUSE_WAIT_SECONDS - elapsed_seconds
-
-    if remaining_seconds <= 0:
-        destroyed_rooms.pop(clean_room, None)
-        save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
-        return 0
-
-    return remaining_seconds
 
 
-def is_room_destroyed(room: str) -> bool:
-    clean_room = sanitize_room_name(room)
-
-    if not clean_room:
-        return False
-
-    return get_room_remaining_lock_seconds(clean_room) > 0
 
 
-def destroy_room_completely(room: str, username: str = "system", reason: str = "panic") -> None:
-    clean_room = sanitize_room_name(room)
 
-    if not clean_room:
-        return
 
-    rooms = load_json(CHAT_FILE)
-    rooms.pop(clean_room, None)
-    save_json(CHAT_FILE, rooms)
 
-    online = load_json(ONLINE_FILE)
-    online.pop(clean_room, None)
-    save_json(ONLINE_FILE, online)
 
-    destroyed_rooms = get_destroyed_rooms()
-    destroyed_rooms[clean_room] = {
-        "destroyed_at": wib_timestamp(),
-        "destroyed_by": username,
-        "reason": reason,
-    }
-    save_json(DESTROYED_ROOMS_FILE, destroyed_rooms)
 
 
 def clear_current_room_session(room: str | None = None) -> None:
@@ -441,38 +273,30 @@ def clear_current_room_session(room: str | None = None) -> None:
 
     st.session_state.pop(LOCKED_ROOM_KEY, None)
     st.session_state.pop(LOCKED_USERNAME_KEY, None)
+    st.session_state.pop("room_token", None)
     st.session_state.pop("last_message_signature", None)
+    st.session_state["composer_id"] = st.session_state.get("composer_id", 0) + 1
 
     if room:
         st.session_state["destroyed_room_notice"] = sanitize_room_name(room)
 
 
 def panic_destroy_current_room(room: str, username: str) -> None:
-    clean_room = sanitize_room_name(room)
-    destroy_room_completely(clean_room, username=username, reason="panic_button")
-    clear_current_room_session(clean_room)
-
-
-def destroy_current_room_with_code(room: str, username: str) -> None:
-    clean_room = sanitize_room_name(room)
-    secret_key = f"destroy_secret_{clean_room}"
-    provided_key = st.session_state.get("destroy_key_input", "")
-    expected_key = st.session_state.get(secret_key, "")
-
-    if provided_key and expected_key and provided_key == expected_key:
-        destroy_room_completely(clean_room, username=username, reason="destroy_code")
-        st.session_state.pop(secret_key, None)
-        st.session_state["destroy_code_ok"] = True
-        clear_current_room_session(clean_room)
+    try:
+        get_store().destroy(st.session_state.get("room_token", ""))
+    except AuthError as exc:
+        st.session_state["auth_notice"] = str(exc)
+        clear_current_room_session()
+    except (OSError, sqlite3.Error) as exc:
+        st.session_state["auth_notice"] = f"Destroy failed: {exc}"
     else:
-        st.session_state["destroy_code_error"] = True
+        clear_current_room_session(room)
 
 
-def auto_clear_destroyed_room_before_widgets() -> None:
-    room_in_session = sanitize_room_name(str(st.session_state.get(ROOM_INPUT_KEY, "")))
 
-    if room_in_session and is_room_destroyed(room_in_session):
-        clear_current_room_session(room_in_session)
+
+
+
 
 
 def get_locked_room() -> str:
@@ -497,27 +321,11 @@ def sync_locked_username_before_widget() -> None:
         st.session_state[USERNAME_INPUT_KEY] = locked_username
 
 
-def lock_room_and_username_after_entering_room(room: str, username: str) -> None:
-    clean_room = sanitize_room_name(room)
-    clean_username = username.strip()
 
-    if not clean_room or not clean_username or get_locked_room() or get_locked_username():
-        return
-
-    st.session_state[LOCKED_ROOM_KEY] = clean_room
-    st.session_state[LOCKED_USERNAME_KEY] = clean_username
-    st.rerun()
 
 # ==============================
 # CHAT HELPERS
 # ==============================
-def make_message(username: str, text: str) -> dict[str, Any]:
-    return {
-        "id": str(uuid.uuid4()),
-        "username": username,
-        "text": encrypt_message(text),
-        "time": wib_now(),
-    }
 
 
 def get_message_signature(messages: list[dict[str, Any]]) -> str:
@@ -606,19 +414,7 @@ def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_
 
 
 def append_message(room: str, username: str, message_text: str, attachment: dict[str, str] | None = None) -> None:
-    clean_room = sanitize_room_name(room)
-    if is_room_destroyed(clean_room):
-        st.session_state["blocked_destroyed_room"] = clean_room
-        clear_current_room_session(clean_room)
-        return
-
-    rooms = load_json(CHAT_FILE)
-    rooms.setdefault(clean_room, [])
-    message = make_message(username, message_text)
-    if attachment is not None:
-        message["attachment"] = attachment
-    rooms[clean_room].append(message)
-    save_json(CHAT_FILE, rooms)
+    get_store().send(st.session_state.get("room_token", ""), message_text, attachment)
 
 # ==============================
 # AUDIO HELPERS
@@ -673,7 +469,7 @@ HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
 def render_header() -> None:
     st.title("ChatSecrets")
     st.write("Ruang percakapan pribadi, dengan tampilan yang nyaman dibaca.")
-    st.caption("Masukkan nama room dan username untuk mulai. Gunakan nama room yang sama untuk bergabung.")
+    st.caption("Join explicitly with a room name, username, and shared password.")
 
 
 def render_sidebar() -> tuple[bool, int, bool, bool]:
@@ -689,22 +485,7 @@ def render_sidebar() -> tuple[bool, int, bool, bool]:
 
 
 def update_online_status(room: str, username: str) -> list[str]:
-    clean_room = sanitize_room_name(room)
-    if is_room_destroyed(clean_room):
-        clear_current_room_session(clean_room)
-        return []
-
-    online = load_json(ONLINE_FILE)
-    now_epoch = int(time.time())
-    online.setdefault(clean_room, {})
-    online[clean_room][username] = now_epoch
-    save_json(ONLINE_FILE, online)
-
-    return [
-        user
-        for user, last_seen in online.get(clean_room, {}).items()
-        if user != username and now_epoch - int(last_seen) <= 10
-    ]
+    return get_store().presence(st.session_state.get("room_token", ""))
 
 
 def render_destroy_room(room: str, username: str) -> None:
@@ -731,11 +512,26 @@ def render_destroy_room(room: str, username: str) -> None:
 # ==============================
 st.markdown(APP_CSS, unsafe_allow_html=True)
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())
-
-auto_clear_destroyed_room_before_widgets()
 render_header()
+st.warning("Fresh password-protected rooms only. Legacy JSON files remain untouched and are copied into an inaccessible archive; old messages are never exposed to new claimants.")
+try:
+    store = get_store()
+except (ValueError, OSError, sqlite3.Error) as exc:
+    st.error(f"Storage unavailable: {exc}")
+    st.stop()
+
+if st.session_state.get("room_token"):
+    try:
+        store.presence(st.session_state["room_token"])
+    except AuthError as exc:
+        clear_current_room_session()
+        st.session_state["auth_notice"] = str(exc)
+    except sqlite3.Error as exc:
+        st.error(f"Storage unavailable: {exc}")
+        st.stop()
+
+if notice := st.session_state.pop("auth_notice", None):
+    st.error(notice)
 auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested = render_sidebar()
 
 if auto_refresh_enabled:
@@ -751,58 +547,42 @@ if notice_room:
         f"Nama room dapat digunakan kembali setelah 30 detik, silahkan datang kembali nanti"
     )
 
-if st.session_state.pop("destroy_code_error", False):
-    st.error("Kode destroy salah atau belum diset.")
 
 sync_locked_room_before_widget()
 sync_locked_username_before_widget()
 locked_room = get_locked_room()
 locked_username = get_locked_username()
-room_is_locked = bool(locked_room)
-username_is_locked = bool(locked_username)
 
-room = st.text_input(
-    "room_name >",
-    placeholder="contoh: black-room-01, atau buat unik, dan bagikan ke lawan bicara",
-    key=ROOM_INPUT_KEY,
-    disabled=room_is_locked,
-)
-username = st.text_input(
-    "username >",
-    placeholder="contoh: SubZero1",
-    key=USERNAME_INPUT_KEY,
-    disabled=username_is_locked,
-)
-
-room = locked_room if room_is_locked else sanitize_room_name(room)
-username = locked_username if username_is_locked else username.strip()
-
-if room_is_locked and username_is_locked:
-    st.caption("Room dan username sudah terkunci setelah masuk room pada session ini.")
-elif room_is_locked:
-    st.caption("Room sudah terkunci setelah masuk room dan tidak bisa diganti pada session ini.")
-elif username_is_locked:
-    st.caption("Username sudah terkunci setelah masuk room dan tidak bisa diganti pada session ini.")
-
-if room and is_room_destroyed(room):
-    remaining_seconds = get_room_remaining_lock_seconds(room)
-    remaining_minutes = remaining_seconds // 60
-    remaining_second_only = remaining_seconds % 60
-
-    st.error(
-        f"Room ini baru saja dihancurkan. Nama room dapat digunakan kembali dalam "
-        f"{remaining_minutes} menit {remaining_second_only} detik."
-    )
+if not st.session_state.get("room_token"):
+    with st.form("join_room", clear_on_submit=True):
+        room = st.text_input("Room name", max_chars=128)
+        username = st.text_input("Username", max_chars=80)
+        password = st.text_input("Shared room password (8–1024 characters)", type="password", max_chars=1024)
+        join = st.form_submit_button("Create / join room", type="primary")
+    st.caption("New room: sets its password. Existing room: requires the same password. Every authenticated member can destroy the room.")
+    if join:
+        try:
+            token = store.join(room, username, password)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            st.error(str(exc))
+        else:
+            st.session_state["room_token"] = token
+            st.session_state[LOCKED_ROOM_KEY] = room.strip()
+            st.session_state[LOCKED_USERNAME_KEY] = username.strip()
+            st.rerun()
     st.stop()
 
-if not room or not username:
-    st.info("Masukkan nama room dan username untuk mulai chat terenkripsi.")
-    st.caption("Software dibuat dengan Python + Streamlit + Fernet encryption.")
+room, username = locked_room, locked_username
+try:
+    online_users = update_online_status(room, username)
+    messages = store.read(st.session_state["room_token"])
+except AuthError as exc:
+    clear_current_room_session()
+    st.session_state["auth_notice"] = str(exc)
+    st.rerun()
+except (sqlite3.Error, InvalidToken, ValueError) as exc:
+    st.error(f"Messages unavailable: {exc}")
     st.stop()
-
-lock_room_and_username_after_entering_room(room, username)
-
-online_users = update_online_status(room, username)
 st.markdown("---")
 st.subheader(f"Room: {room}")
 st.write(f"Login sebagai: `{username}`")
@@ -813,10 +593,9 @@ st.info(
 
 render_destroy_room(room, username)
 
-if not st.session_state.get(ROOM_INPUT_KEY):
+if not st.session_state.get("room_token"):
     st.stop()
 
-messages = load_json(CHAT_FILE).get(room, [])
 play_incoming_sound = should_play_incoming_sound(messages, username, sound_enabled)
 
 components.html(
@@ -831,7 +610,7 @@ if sound_enabled and (play_incoming_sound or test_sound_requested):
 if test_sound_requested:
     st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
 
-# ponytail: small files remain in room JSON; use encrypted blob storage for larger uploads.
+# ponytail: bounded attachments stay encrypted in SQLite; use encrypted blob storage for larger uploads.
 for index, msg in enumerate(messages):
     if not msg.get("attachment"):
         continue
@@ -888,14 +667,18 @@ if send and (message.strip() or uploaded_file is not None):
             attachment["data"] = get_fernet().encrypt(data).decode("ascii")
         text = message.strip() or ("Lampiran: " + attachment["name"])
         append_message(room, username, text, attachment)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, sqlite3.Error, InvalidToken) as exc:
         st.error(f"Pesan belum terkirim: {exc}")
     else:
         st.session_state["composer_id"] = composer_id + 1
         st.rerun()
 
 if ping:
-    append_message(room, username, "PING!")
-    st.rerun()
+    try:
+        append_message(room, username, "PING!")
+    except (ValueError, OSError, sqlite3.Error) as exc:
+        st.error(f"Ping not sent: {exc}")
+    else:
+        st.rerun()
 
 st.caption("Pesan terenkripsi di file lokal. Untuk keamanan, gunakan Panic Room / Destroy Room setelah selesai digunakan.")
