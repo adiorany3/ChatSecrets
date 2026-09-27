@@ -856,6 +856,12 @@ with st.form(f"send_message_form_{composer_id}", clear_on_submit=False):
     send = col1.form_submit_button("Kirim", type="primary", use_container_width=True)
     ping = col2.form_submit_button("Ping", use_container_width=True)
 
+components.html(
+    "<script>" + (Path(__file__).parent / "static" / "composer-focus.js").read_text(encoding="utf-8") + "</script>",
+    height=0,
+    scrolling=False,
+)
+
 if online_users:
     st.success(f"Online: {', '.join(online_users)}")
 else:
