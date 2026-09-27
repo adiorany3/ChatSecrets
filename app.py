@@ -513,7 +513,6 @@ def render_destroy_room(room: str, username: str) -> None:
 st.markdown(APP_CSS, unsafe_allow_html=True)
 
 render_header()
-st.warning("Fresh password-protected rooms only. Legacy JSON files remain untouched and are copied into an inaccessible archive; old messages are never exposed to new claimants.")
 try:
     store = get_store()
 except (ValueError, OSError, sqlite3.Error) as exc:
