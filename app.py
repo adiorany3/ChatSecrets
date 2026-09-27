@@ -113,6 +113,15 @@ button:focus-visible { outline: 2px solid #5eead4; outline-offset: 3px; }
     border-radius: 12px;
 }
 hr { border-color: #334155; }
+[data-testid="stFormSubmitButton"] button[kind="primary"] {
+ background: #134e4a;
+ border-color: #5eead4;
+ color: #f0fdfa;
+}
+input:disabled { -webkit-text-fill-color: #b8c5d6; opacity: 1; }
+@media (max-width: 480px) {
+ [data-testid="stForm"] { padding: .75rem; }
+}
 @media (max-width: 640px) {
     .block-container { padding: 3.5rem 1rem 1.5rem; }
     h2, h3 { font-size: 1.25rem; }
@@ -189,6 +198,7 @@ html, body {
     border-color: #28766e;
     color: #f0fdfa;
 }
+.chat-box:focus-visible { outline: 2px solid #5eead4; outline-offset: -3px; }
 .chat-message-text { white-space: pre-wrap; }
 .chat-meta { margin-top: 8px; font-size: 13px; color: #cbd5e1; }
 .empty-line { padding: 32px 8px; color: #b8c5d6; text-align: center; }
@@ -556,7 +566,7 @@ def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_
 
     return f"""
     <style>{CHAT_COMPONENT_CSS}</style>
-    <div id="chatBox" class="chat-box">{sound_panel}{body}</div>
+    <div id="chatBox" class="chat-box" tabindex="0" role="region" aria-label="Pesan chat">{sound_panel}{body}</div>
     <audio id="chatSound" src="{escaped_sound_src}"></audio>
     <script>
       window.chatSound = document.getElementById('chatSound');
@@ -808,7 +818,7 @@ if test_sound_requested:
 with st.form("send_message_form", clear_on_submit=True):
     message = st.text_input("Pesan", placeholder="Tulis pesan...")
     col1, col2 = st.columns([3, 2])
-    send = col1.form_submit_button("Kirim", use_container_width=True)
+    send = col1.form_submit_button("Kirim", type="primary", use_container_width=True)
     ping = col2.form_submit_button("Ping", use_container_width=True)
 
 if online_users:
