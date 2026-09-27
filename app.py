@@ -15,7 +15,8 @@ from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
+from attachments import FILE_TYPES, validate_attachment
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -498,7 +499,7 @@ def lock_room_and_username_after_entering_room(room: str, username: str) -> None
 # ==============================
 # CHAT HELPERS
 # ==============================
-def make_message(username: str, text: str) -> dict[str, str]:
+def make_message(username: str, text: str) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "username": username,
@@ -592,7 +593,7 @@ def render_chat_box(messages: list[dict[str, Any]], current_username: str, play_
     """
 
 
-def append_message(room: str, username: str, message_text: str) -> None:
+def append_message(room: str, username: str, message_text: str, attachment: dict[str, str] | None = None) -> None:
     clean_room = sanitize_room_name(room)
     if is_room_destroyed(clean_room):
         st.session_state["blocked_destroyed_room"] = clean_room
@@ -601,7 +602,10 @@ def append_message(room: str, username: str, message_text: str) -> None:
 
     rooms = load_json(CHAT_FILE)
     rooms.setdefault(clean_room, [])
-    rooms[clean_room].append(make_message(username, message_text))
+    message = make_message(username, message_text)
+    if attachment is not None:
+        message["attachment"] = attachment
+    rooms[clean_room].append(message)
     save_json(CHAT_FILE, rooms)
 
 # ==============================
@@ -815,8 +819,39 @@ if sound_enabled and (play_incoming_sound or test_sound_requested):
 if test_sound_requested:
     st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
 
-with st.form("send_message_form", clear_on_submit=True):
-    message = st.text_input("Pesan", placeholder="Tulis pesan...")
+# ponytail: small files remain in room JSON; use encrypted blob storage for larger uploads.
+for index, msg in enumerate(messages):
+    if not msg.get("attachment"):
+        continue
+    with st.expander(f"Lampiran — {msg.get('username', '')} · {msg.get('time', '')}"):
+        try:
+            attachment = msg["attachment"]
+            data = get_fernet().decrypt(attachment["data"].encode())
+            info = validate_attachment(attachment["name"], data)
+        except (InvalidToken, ValueError, KeyError, TypeError, AttributeError):
+            st.error("Lampiran tidak dapat dibaca atau tidak valid.")
+            continue
+        if info["mime"].startswith("image/"):
+            encoded = base64.b64encode(data).decode("ascii")
+            st.markdown(
+                f'<img src="data:{info["mime"]};base64,{encoded}" '
+                f'alt="{html.escape(info["name"], quote=True)}" '
+                'style="max-width:100%;max-height:360px;object-fit:contain">',
+                unsafe_allow_html=True,
+            )
+        st.download_button(
+            "Unduh " + info["name"], data=data, file_name=info["name"],
+            mime="application/octet-stream", key=f"attachment_{index}",
+        )
+        st.caption("Buka hanya file dari pengirim tepercaya. File tidak dipindai antivirus.")
+
+composer_id = st.session_state.get("composer_id", 0)
+with st.form(f"send_message_form_{composer_id}", clear_on_submit=False):
+    message = st.text_input("Pesan", placeholder="Tulis pesan...", key=f"message_{composer_id}")
+    uploaded_file = st.file_uploader(
+        "Gambar atau dokumen (maksimal 5 MiB)", type=list(FILE_TYPES),
+        key=f"upload_{composer_id}",
+    )
     col1, col2 = st.columns([3, 2])
     send = col1.form_submit_button("Kirim", type="primary", use_container_width=True)
     ping = col2.form_submit_button("Ping", use_container_width=True)
@@ -826,9 +861,20 @@ if online_users:
 else:
     st.info("Belum ada lawan bicara online di room ini.")
 
-if send and message.strip():
-    append_message(room, username, message.strip())
-    st.rerun()
+if send and (message.strip() or uploaded_file is not None):
+    try:
+        attachment = None
+        if uploaded_file is not None:
+            data = uploaded_file.getvalue()
+            attachment = validate_attachment(uploaded_file.name, data)
+            attachment["data"] = get_fernet().encrypt(data).decode("ascii")
+        text = message.strip() or ("Lampiran: " + attachment["name"])
+        append_message(room, username, text, attachment)
+    except (ValueError, OSError) as exc:
+        st.error(f"Pesan belum terkirim: {exc}")
+    else:
+        st.session_state["composer_id"] = composer_id + 1
+        st.rerun()
 
 if ping:
     append_message(room, username, "PING!")
