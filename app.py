@@ -6,6 +6,7 @@ import json
 import math
 import os
 import struct
+import tempfile
 import time
 import uuid
 import wave
@@ -213,21 +214,32 @@ html, body {
 # STORAGE + CRYPTO HELPERS
 # ==============================
 def load_json(path: str) -> dict[str, Any]:
-    if not os.path.exists(path):
-        return {}
     try:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
+    except FileNotFoundError:
         return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Format penyimpanan tidak valid: {path}")
+    return data
 
 
 def save_json(path: str, data: dict[str, Any]) -> None:
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-    os.replace(tmp_path, path)
+    # ponytail: atomic writes only; use SQLite transactions for concurrent updates.
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=Path(path).parent,
+            prefix=f".{Path(path).name}.", suffix=".tmp", delete=False,
+        ) as file:
+            tmp_path = file.name
+            json.dump(data, file, indent=2, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 def _read_fernet_key_from_toml() -> str | None:
