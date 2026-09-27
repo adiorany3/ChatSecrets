@@ -25,7 +25,7 @@ except Exception:
 # ==============================
 # CONFIG
 # ==============================
-APP_TITLE = "ChatSecrets Hacker Terminal"
+APP_TITLE = "ChatSecrets"
 APP_ICON = "💻"
 SECRETS_FILE = Path(".streamlit") / "secrets.toml"
 CHAT_FILE = "chat_rooms.json"
@@ -45,203 +45,157 @@ st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
 # ==============================
 APP_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-:root {
-    --terminal-green: #00ff66;
-    --terminal-soft: #7dffad;
-    --terminal-cyan: #00ddff;
-    --terminal-bg: #020403;
-    --terminal-panel: rgba(0, 12, 5, 0.92);
-}
-
 .stApp {
-    background:
-        linear-gradient(rgba(0,255,102,.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,255,102,.025) 1px, transparent 1px),
-        radial-gradient(circle at 50% -10%, rgba(0,255,102,.22) 0%, rgba(0,0,0,.72) 34%, #000 78%);
-    background-size: 28px 28px, 28px 28px, cover;
-    color: var(--terminal-green);
-    font-family: 'Share Tech Mono', monospace !important;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6;
 }
-
-.stApp::before {
-    content: "";
-    pointer-events: none;
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: repeating-linear-gradient(
-        to bottom,
-        rgba(255,255,255,.035) 0px,
-        rgba(255,255,255,.035) 1px,
-        transparent 1px,
-        transparent 4px
-    );
-    mix-blend-mode: overlay;
-}
-
-.stApp::after {
-    content: "01001000 01000001 01000011 01001011  //  SECURE TERMINAL";
-    pointer-events: none;
-    position: fixed;
-    left: 18px;
-    bottom: 12px;
-    color: rgba(0,255,102,.18);
-    font-family: 'Share Tech Mono', monospace;
-    letter-spacing: 2px;
-    font-size: 12px;
-}
-
 .block-container {
-    max-width: 940px;
-    padding-top: 1.4rem;
-    padding-bottom: 2rem;
+    max-width: 960px;
+    padding: 4rem 2rem 2rem;
 }
-
 [data-testid="stSidebar"] {
-    background: rgba(0, 6, 2, 0.98);
-    border-right: 1px solid rgba(0,255,102,.42);
-    box-shadow: inset -14px 0 28px rgba(0,255,102,.05);
+    background: #162033;
+    color: #e2e8f0;
+    border-right: 1px solid #334155;
 }
-
-h1, h2, h3, .stMarkdown, .stCaptionContainer, label, p, span, div {
-    font-family: 'Share Tech Mono', monospace !important;
+h1, h2, h3 {
+    color: #f8fafc;
+    line-height: 1.3;
+    letter-spacing: normal;
+    overflow-wrap: anywhere;
 }
-
-h1 {
-    color: var(--terminal-green) !important;
-    text-shadow: 0 0 10px rgba(0,255,102,.72), 0 0 28px rgba(0,255,102,.35);
-    border: 1px solid rgba(0,255,102,.45);
-    border-left: 5px solid var(--terminal-green);
-    padding: 16px 18px;
-    background: linear-gradient(90deg, rgba(0,255,102,.12), rgba(0,0,0,.15));
-    letter-spacing: 1px;
+h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); }
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stCaptionContainer"],
+[data-testid="stWidgetLabel"] p {
+    line-height: 1.6;
+    overflow-wrap: anywhere;
 }
-
-h1::after {
-    content: "_";
-    animation: cursorBlink 1s steps(2, start) infinite;
+[data-testid="stCaptionContainer"] { color: #b8c5d6; }
+[data-testid="stWidgetLabel"] { color: #e2e8f0; }
+input, textarea {
+    font-family: inherit;
+    font-size: 16px !important;
+    line-height: 1.5;
+    color: #f8fafc !important;
+    caret-color: #5eead4;
 }
-
-@keyframes cursorBlink { 0%, 48% { opacity: 1; } 49%, 100% { opacity: 0; } }
-
-[data-testid="stMarkdownContainer"] code,
-.stCodeBlock,
-pre {
-    color: var(--terminal-green) !important;
-    background: rgba(0,255,102,.08) !important;
-    border: 1px solid rgba(0,255,102,.35) !important;
-}
-
-input, textarea, [data-baseweb="input"] input {
-    font-family: 'Share Tech Mono', monospace !important;
-    color: var(--terminal-green) !important;
-    caret-color: var(--terminal-green) !important;
-}
-
+input::placeholder, textarea::placeholder { color: #a8b7cc; opacity: 1; }
 [data-baseweb="input"], [data-baseweb="textarea"] {
-    background: rgba(0, 0, 0, 0.74) !important;
-    border: 1px solid rgba(0,255,102,.5) !important;
-    box-shadow: inset 0 0 14px rgba(0,255,102,.09), 0 0 10px rgba(0,255,102,.08);
-    border-radius: 0 !important;
+    background: #162033;
+    border: 1px solid #64748b;
+    border-radius: 10px;
 }
-
 [data-baseweb="input"]:focus-within, [data-baseweb="textarea"]:focus-within {
-    border-color: var(--terminal-green) !important;
-    box-shadow: 0 0 0 1px rgba(0,255,102,.65), 0 0 18px rgba(0,255,102,.26) !important;
+    border-color: #5eead4;
+    outline: 2px solid #5eead4;
+    outline-offset: 2px;
 }
-
-.stButton > button,
-[data-testid="stFormSubmitButton"] button,
-button[kind="primary"],
-button[kind="secondary"] {
-    background: #001a08 !important;
-    color: var(--terminal-green) !important;
-    border: 1px solid var(--terminal-green) !important;
-    border-radius: 0 !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    box-shadow: 0 0 12px rgba(0,255,102,.18), inset 0 0 10px rgba(0,255,102,.08);
+.stButton > button, [data-testid="stFormSubmitButton"] button {
+    min-height: 44px;
+    background: #1e293b;
+    color: #f8fafc;
+    border: 1px solid #64748b;
+    border-radius: 10px;
+    padding: .6rem 1rem;
+    white-space: normal;
 }
-
-.stButton > button:hover,
-[data-testid="stFormSubmitButton"] button:hover {
-    background: var(--terminal-green) !important;
-    color: #000 !important;
-    box-shadow: 0 0 22px rgba(0,255,102,.55) !important;
+.stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
+    background: #134e4a;
+    color: #f0fdfa;
+    border-color: #5eead4;
 }
-
-.stAlert {
-    background: rgba(0, 12, 5, .86) !important;
-    border: 1px solid rgba(0,255,102,.42) !important;
-    border-radius: 0 !important;
-    box-shadow: 0 0 18px rgba(0,255,102,.1);
+button:focus-visible { outline: 2px solid #5eead4; outline-offset: 3px; }
+[data-testid="stExpander"], [data-testid="stForm"] {
+    border: 1px solid #334155;
+    border-radius: 12px;
 }
-
-hr {
-    border-color: rgba(0,255,102,.34) !important;
+hr { border-color: #334155; }
+@media (max-width: 640px) {
+    .block-container { padding: 3.5rem 1rem 1.5rem; }
+    h2, h3 { font-size: 1.25rem; }
+    [data-testid="stForm"] [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap;
+        gap: .75rem;
+    }
+    [data-testid="stForm"] [data-testid="stColumn"] {
+        min-width: 120px;
+        flex: 1 1 120px;
+    }
 }
-
-section[data-testid="stSidebar"] .stMarkdown {
-    color: var(--terminal-soft) !important;
-}
-
-[data-testid="stExpander"] {
-    border: 1px solid rgba(0,255,102,.42) !important;
-    border-radius: 0 !important;
-    background: var(--terminal-panel) !important;
-}
-
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: var(--terminal-green); border: 2px solid #000; }
 </style>
 """
 
 CHAT_COMPONENT_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-:root { --g:#00ff66; --c:#00ddff; --soft:#9cffb8; --dim:rgba(125,255,173,.72); }
-html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share Tech Mono', monospace; }
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #0f172a;
+    color: #e2e8f0;
+    font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 .chat-box {
-  height: 430px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scroll-behavior: auto;
-  box-sizing: border-box;
-  position: relative;
-  background:
-    repeating-linear-gradient(to bottom, rgba(255,255,255,.035) 0, rgba(255,255,255,.035) 1px, transparent 1px, transparent 5px),
-    linear-gradient(180deg, rgba(0,28,10,.98), rgba(0,0,0,.96));
-  border: 1px solid var(--g);
-  padding: 16px;
-  box-shadow: inset 0 0 30px rgba(0,255,102,.18), 0 0 22px rgba(0,255,102,.24);
-  color: var(--g);
+    height: 440px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 16px;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    background: #162033;
+    overflow-wrap: anywhere;
 }
-.chat-box::before {
-  content: "ACCESS GRANTED // ENCRYPTED CHAT LOG // LIVE FEED";
-  display: block;
-  color: var(--soft);
-  border-bottom: 1px dashed rgba(0,255,102,.55);
-  padding-bottom: 8px;
-  margin-bottom: 10px;
-  letter-spacing: 1.5px;
-  text-shadow: 0 0 9px rgba(0,255,102,.55);
+.sound-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #334155;
+    color: #b8c5d6;
+    font-size: 14px;
 }
-.sound-panel { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; margin-bottom: 10px; border: 1px dashed rgba(0,255,102,.45); background: rgba(0, 255, 102, 0.05); color: var(--dim); font-size: 12px; }
-.sound-panel button { background: #001a08; color: var(--g); border: 1px solid var(--g); padding: 6px 9px; cursor: pointer; font-family: 'Share Tech Mono', monospace; text-transform: uppercase; }
-.sound-panel button:hover { background: var(--g); color: #000; box-shadow: 0 0 14px rgba(0,255,102,.55); }
-.chat-bubble { background: rgba(0,255,102,.035); border: 1px solid rgba(0,255,102,.22); border-left: 4px solid var(--g); padding: 10px 12px; margin: 10px 0; color: var(--g); text-shadow: 0 0 6px rgba(0,255,102,.65); word-wrap: break-word; overflow-wrap: anywhere; }
-.chat-bubble::before { content: "root@chatsecrets:~# "; color: var(--soft); }
-.chat-bubble.me { border-left-color: var(--c); color: #8ff3ff; text-shadow: 0 0 6px rgba(0,204,255,.65); background: rgba(0,221,255,.04); }
-.chat-bubble.me::before { content: "you@terminal:~$ "; color: #8ff3ff; }
-.chat-message-text { display: inline; white-space: normal; }
-.chat-meta { font-size: 12px; color: var(--dim); margin-top: 6px; border-top: 1px dashed rgba(0,255,102,.18); padding-top: 5px; }
-.empty-line { color: var(--dim); margin-top: 14px; }
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: var(--g); }
+.sound-panel span { flex: 1 1 180px; min-width: 0; }
+.sound-panel button {
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid #5eead4;
+    border-radius: 8px;
+    background: #134e4a;
+    color: #f0fdfa;
+    font: inherit;
+    cursor: pointer;
+}
+.sound-panel button:hover { background: #115e59; }
+.sound-panel button:focus-visible { outline: 2px solid #5eead4; outline-offset: 3px; }
+.chat-bubble {
+    width: fit-content;
+    max-width: 90%;
+    margin: 12px 0;
+    padding: 12px 16px;
+    border: 1px solid #475569;
+    border-radius: 12px;
+    background: #1e293b;
+    overflow-wrap: anywhere;
+}
+.chat-bubble.me {
+    margin-left: auto;
+    background: #134e4a;
+    border-color: #28766e;
+    color: #f0fdfa;
+}
+.chat-message-text { white-space: pre-wrap; }
+.chat-meta { margin-top: 8px; font-size: 13px; color: #cbd5e1; }
+.empty-line { padding: 32px 8px; color: #b8c5d6; text-align: center; }
+@media (max-width: 480px) {
+    .chat-box { padding: 12px; }
+    .chat-bubble { max-width: 100%; padding: 10px 12px; }
+}
 """
 
 # ==============================
@@ -570,7 +524,7 @@ def should_play_incoming_sound(messages: list[dict[str, Any]], current_username:
 
 def render_chat_messages(messages: list[dict[str, Any]], current_username: str) -> str:
     if not messages:
-        return '<div class="empty-line">[LOG] Belum ada pesan. Kirim command pertama...</div>'
+        return '<div class="empty-line">Belum ada pesan. Mulai percakapan dengan mengirim pesan pertama.</div>'
 
     chat_parts: list[str] = []
     for msg in messages:
@@ -691,28 +645,19 @@ HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
 # UI HELPERS
 # ==============================
 def render_header() -> None:
-    st.markdown(
-        """
-        # root@ChatSecrets:~# ./secure-terminal
-
-        [BOOT] Hacker terminal theme loaded...  
-        [CRYPTO] Fernet encryption active..  
-        [MODE] Private multi-room communication..  
-        [TRACE] Room status, online users, and encrypted logs are displayed in terminal style..  
-        [WARNING] Use Panic Room / Destroy Room after use for maximum privacy..
-        """,
-        unsafe_allow_html=True,
-    )
+    st.title("ChatSecrets")
+    st.write("Ruang percakapan pribadi, dengan tampilan yang nyaman dibaca.")
+    st.caption("Masukkan nama room dan username untuk mulai. Gunakan nama room yang sama untuk bergabung.")
 
 
 def render_sidebar() -> tuple[bool, int, bool, bool]:
     with st.sidebar:
-        st.markdown("### [SYSTEM CONTROL]")
+        st.markdown("### Pengaturan")
         auto_refresh_enabled = st.toggle("Aktifkan auto refresh", value=True)
         refresh_seconds = st.slider("Interval refresh", min_value=2, max_value=15, value=3, step=1)
         sound_enabled = st.toggle("Suara pesan masuk", value=True)
-        test_sound_requested = st.button("Test Hacker Sound", use_container_width=True)
-        st.caption("Klik Test Hacker Sound sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
+        test_sound_requested = st.button("Tes suara", use_container_width=True)
+        st.caption("Klik Tes suara sekali. Setelah browser mengizinkan audio, pesan masuk dari user lain akan berbunyi otomatis.")
         st.caption("Matikan auto-refresh sementara kalau sedang mengetik pesan panjang.")
         return auto_refresh_enabled, refresh_seconds, sound_enabled, test_sound_requested
 
@@ -861,10 +806,10 @@ if test_sound_requested:
     st.success("Test sound dipicu. Kalau belum terdengar, cek izin audio browser/tab dan volume perangkat.")
 
 with st.form("send_message_form", clear_on_submit=True):
-    message = st.text_input("command_message >", placeholder="ketik pesan rahasia...")
-    col1, col2 = st.columns([3, 1])
-    send = col1.form_submit_button("Send")
-    ping = col2.form_submit_button("Ping")
+    message = st.text_input("Pesan", placeholder="Tulis pesan...")
+    col1, col2 = st.columns([3, 2])
+    send = col1.form_submit_button("Kirim", use_container_width=True)
+    ping = col2.form_submit_button("Ping", use_container_width=True)
 
 if online_users:
     st.success(f"Online: {', '.join(online_users)}")
