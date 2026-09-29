@@ -27,11 +27,16 @@ class AuthError(ValueError):
 
 def provision_key(secrets_file: Path, configured: str | None = None) -> bytes:
     """Never rewrite TOML. Publish a complete sidecar key atomically under a process lock."""
-    import fcntl  # macOS/Linux deployment; fail closed on unsupported platforms.
+    try:
+        import fcntl  # macOS/Linux deployment; fail closed on unsupported platforms.
+    except ImportError:
+        fcntl = None  # type: ignore[assignment]
     secrets_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(secrets_file.parent / "fernet.lock", "a+b") as lock:
+    lock_path = secrets_file.parent / "fernet.lock"
+    with open(lock_path, "a+b") as lock:
         os.chmod(lock.name, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         config = tomllib.loads(secrets_file.read_text()) if secrets_file.exists() else {}
         local = config.get("secrets", {}).get("fernet_key") or config.get("fernet_key")
         key_file = secrets_file.parent / "fernet.key"
@@ -59,15 +64,26 @@ def provision_key(secrets_file: Path, configured: str | None = None) -> bytes:
                 output.write(key)
                 output.flush()
                 os.fsync(output.fileno())
-            os.link(temporary, key_file)  # Exclusive publication; never overwrite a key.
+            try:
+                os.link(temporary, key_file)  # Exclusive publication; never overwrite a key.
+            except FileExistsError:
+                return key_file.read_bytes().strip()
             directory = os.open(secrets_file.parent, os.O_RDONLY)
             try:
                 os.fsync(directory)
             finally:
                 os.close(directory)
         finally:
+            if fcntl is not None:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                except OSError:
+                    pass
             if temporary is not None:
-                temporary.unlink(missing_ok=True)
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return key
 
 
@@ -114,6 +130,7 @@ class Store:
     @contextmanager
     def transaction(self):
         db = sqlite3.connect(self.path, timeout=30)
+        db.execute("PRAGMA journal_mode=WAL")
         db.row_factory = sqlite3.Row
         try:
             db.execute("BEGIN IMMEDIATE")

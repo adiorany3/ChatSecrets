@@ -237,7 +237,7 @@ def get_fernet() -> Fernet:
 def decrypt_message(text: str) -> str:
     try:
         return get_fernet().decrypt(text.encode()).decode()
-    except Exception:
+    except InvalidToken:
         return "[Pesan tidak dapat didekripsi]"
 
 
