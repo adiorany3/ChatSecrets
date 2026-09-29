@@ -228,6 +228,14 @@ class Store:
                 (session["room"], session["generation"], self.clock() - ONLINE_SECONDS, self._token(token)),
             )]
 
+    def clear_messages(self, token):
+        with self.transaction() as db:
+            session = self._auth(db, token)
+            db.execute(
+                "DELETE FROM messages WHERE room=? AND generation=?",
+                (session["room"], session["generation"]),
+            )
+
     def destroy(self, token):
         with self.transaction() as db:
             session = self._auth(db, token)

@@ -488,6 +488,32 @@ def update_online_status(room: str, username: str) -> list[str]:
     return get_store().presence(st.session_state.get("room_token", ""))
 
 
+def clear_current_room_messages() -> None:
+    try:
+        get_store().clear_messages(st.session_state.get("room_token", ""))
+    except AuthError as exc:
+        st.session_state["auth_notice"] = str(exc)
+    except (OSError, sqlite3.Error) as exc:
+        st.error(f"Gagal membersihkan chat: {exc}")
+    else:
+        st.session_state.pop("last_message_signature", None)
+        st.success("Semua isi chat telah dibersihkan. Room dan sesi tetap aktif.")
+
+
+def render_clear_chat(room: str) -> None:
+    clean_room = sanitize_room_name(room)
+    with st.expander("Bersihkan chat", expanded=False):
+        st.warning("Tindakan ini menghapus semua pesan dan lampiran di room, tetapi room tetap aktif.")
+        confirmed = st.checkbox("Saya mengerti bahwa semua isi chat akan dihapus.", key=f"confirm_clear_{clean_room}")
+        st.button(
+            "Bersihkan semua isi chat",
+            use_container_width=True,
+            disabled=not confirmed,
+            key=f"clear_chat_{clean_room}",
+            on_click=clear_current_room_messages,
+        )
+
+
 def render_destroy_room(room: str, username: str) -> None:
     clean_room = sanitize_room_name(room)
     with st.expander("Destroy / Panic Room", expanded=False):
@@ -590,6 +616,7 @@ st.info(
     f"Suara: {'ON' if sound_enabled else 'OFF'}."
 )
 
+render_clear_chat(room)
 render_destroy_room(room, username)
 
 if not st.session_state.get("room_token"):

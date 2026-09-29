@@ -137,6 +137,16 @@ class StorageTests(unittest.TestCase):
             restarted.send(self.token, "stale")
         self.assertEqual(restarted.read(fresh), [])
 
+    def test_clear_messages_keeps_room_and_session(self):
+        self.store.send(self.token, "to clear")
+        self.assertEqual(len(self.store.read(self.token)), 1)
+
+        self.store.clear_messages(self.token)
+
+        self.assertEqual(self.store.read(self.token), [])
+        self.store.send(self.token, "room still works")
+        self.assertEqual(len(self.store.read(self.token)), 1)
+
     def test_attachments_and_quarantine(self):
         attachment = {"name": "note.txt", "mime": "application/octet-stream", "data": self.store.fernet.encrypt(b"private attachment").decode()}
         self.store.send(self.token, "caption", attachment)
