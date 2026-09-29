@@ -23,7 +23,7 @@ except Exception:
 # ==============================
 # CONFIG
 # ==============================
-APP_TITLE = "ChatSecrets"
+APP_TITLE = "Cit Chat"
 APP_ICON = "💻"
 BASE_DIR = Path(__file__).resolve().parent
 SECRETS_FILE = BASE_DIR / ".streamlit" / "secrets.toml"
