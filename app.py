@@ -493,6 +493,8 @@ def clear_current_room_messages() -> None:
         get_store().clear_messages(st.session_state.get("room_token", ""))
     except AuthError as exc:
         st.session_state["auth_notice"] = str(exc)
+    except AttributeError:
+        st.error("Versi aplikasi dan storage tidak sinkron. Deploy ulang app.py dan storage.py dari commit terbaru, lalu restart aplikasi.")
     except (OSError, sqlite3.Error) as exc:
         st.error(f"Gagal membersihkan chat: {exc}")
     else:
