@@ -467,7 +467,7 @@ HACKER_SOUND_DATA_URI = build_hacker_wav_data_uri()
 # UI HELPERS
 # ==============================
 def render_header() -> None:
-    st.title("ChatSecrets")
+    st.title("Cit Chat")
     st.write("Ruang percakapan pribadi, dengan tampilan yang nyaman dibaca.")
     st.caption("Join explicitly with a room name, username, and shared password.")
 
